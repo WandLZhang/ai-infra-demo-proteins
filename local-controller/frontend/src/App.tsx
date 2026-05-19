@@ -1,140 +1,27 @@
-import React, { useState, useCallback, useRef, useMemo } from 'react'
-import { ReactFlow, Background, type Node, type Edge, Position, MarkerType } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
-import { motion, AnimatePresence } from 'motion/react'
-import { Dna, Zap, DollarSign, Cpu, Server, Activity } from 'lucide-react'
+import React, { useState, useCallback, useRef } from 'react'
+import { Zap, Dna } from 'lucide-react'
+import './hud.css'
 
-import ProteinSelector, { PROTEINS } from './components/ProteinSelector'
-import BackendLane from './components/BackendLane'
+import InfraMap, { type ZoneInfo } from './components/InfraMap'
+import SideLadder from './components/SideLadder'
+import LocationPaper from './components/LocationPaper'
 import Scorecard from './components/Scorecard'
 import TalkTrackBadge from './components/TalkTrackBadge'
 import type { Protein, ModelId, BackendId, LaneStatus, PredictResponse } from './types'
 import { BACKENDS } from './backends'
 
+const PROTEINS: Protein[] = [
+  { id: 'brca1', name: 'BRCA1 BRCT', sequence: 'MPIGSKERPT...', uniprotId: 'P38398', description: 'Breast cancer tumor suppressor — DNA repair', residueCount: 213 },
+  { id: 'p53', name: 'p53 DBD', sequence: 'MCNSSCMGGM...', uniprotId: 'P04637', description: 'Tumor suppressor — guardian of the genome', residueCount: 195 },
+  { id: 'ace2', name: 'ACE2 PD', sequence: 'MSSSSWLLLS...', uniprotId: 'Q9BYF1', description: 'SARS-CoV-2 receptor — COVID-19 entry point', residueCount: 615 },
+  { id: 'hemoglobin', name: 'Hemoglobin α', sequence: 'MVLSPADKTN...', uniprotId: 'P69905', description: 'Oxygen transport — sickle cell disease', residueCount: 142 },
+  { id: 'insulin', name: 'Insulin receptor', sequence: 'MATGGRRGAA...', uniprotId: 'P06213', description: 'Diabetes — receptor tyrosine kinase', residueCount: 267 },
+  { id: 'cftr', name: 'CFTR NBD1', sequence: 'MKQFNLRSF...', uniprotId: 'P13569', description: 'Cystic fibrosis transmembrane regulator', residueCount: 250 },
+]
+
 function initLaneStatus(backendId: BackendId): LaneStatus {
   const b = BACKENDS.find(b => b.id === backendId)!
-  return {
-    backendId, state: 'idle', startedAt: null, completedAt: null,
-    elapsedMs: 0, costAccumulated: 0, result: null, error: null,
-    talkTrackSlide: b.talkTrackSlide, talkTrackLabel: b.talkTrackLabel,
-  }
-}
-
-function buildInfraNodes(lanes: Record<BackendId, LaneStatus>): Node[] {
-  const stateColor = (id: BackendId) => {
-    const s = lanes[id]?.state
-    if (s === 'done') return '#10b981'
-    if (s === 'failed') return '#ef4444'
-    if (s === 'inferring') return '#06b6d4'
-    if (s === 'allocating' || s === 'pulling' || s === 'loading') return '#eab308'
-    if (s === 'queued') return '#6366f1'
-    return '#27272a'
-  }
-
-  const nodeStyle = (id: BackendId) => ({
-    background: '#0a0a0f',
-    border: `1.5px solid ${stateColor(id)}`,
-    borderRadius: 6,
-    padding: '6px 10px',
-    color: '#e4e4e7',
-    fontSize: 10,
-    fontFamily: "'Google Sans', 'Inter', monospace",
-    width: 120,
-    textAlign: 'center' as const,
-    boxShadow: `0 0 8px ${stateColor(id)}22`,
-  })
-
-  return [
-    // Controller
-    {
-      id: 'controller', type: 'default', position: { x: 50, y: 220 },
-      data: { label: '🖥 slurmctld\nwz-nih-demo-controller' },
-      style: { background: '#0a0a0f', border: '1.5px solid #06b6d4', borderRadius: 6, padding: '6px 10px', color: '#06b6d4', fontSize: 10, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const, boxShadow: '0 0 12px #06b6d422' },
-      sourcePosition: Position.Right,
-    },
-    // TPU column
-    {
-      id: 'tpu-header', type: 'default', position: { x: 380, y: 20 },
-      data: { label: '⚡ TPU v6e Trillium\nSpot · 5 CONUS zones' },
-      style: { background: '#064e3b15', border: '1px solid #10b98133', borderRadius: 6, padding: '4px 8px', color: '#6ee7b7', fontSize: 9, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const },
-    },
-    {
-      id: 'af2-tpu', type: 'default', position: { x: 360, y: 100 },
-      data: { label: `AF2\n${lanes['af2-tpu']?.state ?? 'idle'}` },
-      style: nodeStyle('af2-tpu'), targetPosition: Position.Left, sourcePosition: Position.Right,
-    },
-    {
-      id: 'esmfold-tpu', type: 'default', position: { x: 360, y: 210 },
-      data: { label: `ESMFold\n${lanes['esmfold-tpu']?.state ?? 'idle'}` },
-      style: nodeStyle('esmfold-tpu'), targetPosition: Position.Left, sourcePosition: Position.Right,
-    },
-    {
-      id: 'boltz2-tpu', type: 'default', position: { x: 360, y: 320 },
-      data: { label: `Boltz-2\n${lanes['boltz2-tpu']?.state ?? 'idle'}` },
-      style: nodeStyle('boltz2-tpu'), targetPosition: Position.Left, sourcePosition: Position.Right,
-    },
-    // GPU column
-    {
-      id: 'gpu-header', type: 'default', position: { x: 620, y: 20 },
-      data: { label: '🔥 GPU A100\nSpot · 2 CONUS zones' },
-      style: { background: '#451a0315', border: '1px solid #f5920033', borderRadius: 6, padding: '4px 8px', color: '#fbbf24', fontSize: 9, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const },
-    },
-    {
-      id: 'af2-gpu', type: 'default', position: { x: 600, y: 100 },
-      data: { label: `AF2\n${lanes['af2-gpu']?.state ?? 'idle'}` },
-      style: nodeStyle('af2-gpu'), targetPosition: Position.Left, sourcePosition: Position.Right,
-    },
-    {
-      id: 'esmfold-gpu', type: 'default', position: { x: 600, y: 210 },
-      data: { label: `ESMFold\n${lanes['esmfold-gpu']?.state ?? 'idle'}` },
-      style: nodeStyle('esmfold-gpu'), targetPosition: Position.Left, sourcePosition: Position.Right,
-    },
-    {
-      id: 'boltz2-gpu', type: 'default', position: { x: 600, y: 320 },
-      data: { label: `Boltz-2\n${lanes['boltz2-gpu']?.state ?? 'idle'}` },
-      style: nodeStyle('boltz2-gpu'), targetPosition: Position.Left, sourcePosition: Position.Right,
-    },
-    // Results
-    {
-      id: 'results', type: 'default', position: { x: 880, y: 220 },
-      data: { label: '📊 Results\nPDB + pLDDT + $/prediction' },
-      style: { background: '#0a0a0f', border: '1px solid #06b6d433', borderRadius: 6, padding: '6px 10px', color: '#a1a1aa', fontSize: 9, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const },
-      targetPosition: Position.Left,
-    },
-  ]
-}
-
-function buildInfraEdges(lanes: Record<BackendId, LaneStatus>): Edge[] {
-  const edgeColor = (id: BackendId) => {
-    const s = lanes[id]?.state
-    if (s === 'done') return '#10b981'
-    if (s === 'inferring') return '#06b6d4'
-    if (s !== 'idle') return '#eab30888'
-    return '#27272a44'
-  }
-  const animated = (id: BackendId) => {
-    const s = lanes[id]?.state
-    return s !== 'idle' && s !== 'done' && s !== 'failed'
-  }
-
-  const backends: BackendId[] = ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu']
-  const edges: Edge[] = []
-
-  for (const id of backends) {
-    edges.push({
-      id: `ctrl-${id}`, source: 'controller', target: id,
-      animated: animated(id),
-      style: { stroke: edgeColor(id), strokeWidth: animated(id) ? 2 : 1 },
-      markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor(id) },
-    })
-    edges.push({
-      id: `${id}-results`, source: id, target: 'results',
-      animated: lanes[id]?.state === 'done',
-      style: { stroke: lanes[id]?.state === 'done' ? '#10b981' : '#27272a22', strokeWidth: 1 },
-      markerEnd: { type: MarkerType.ArrowClosed, color: lanes[id]?.state === 'done' ? '#10b981' : '#27272a22' },
-    })
-  }
-  return edges
+  return { backendId, state: 'idle', startedAt: null, completedAt: null, elapsedMs: 0, costAccumulated: 0, result: null, error: null, talkTrackSlide: b.talkTrackSlide, talkTrackLabel: b.talkTrackLabel }
 }
 
 export default function App() {
@@ -144,8 +31,8 @@ export default function App() {
   const [isRunning, setIsRunning] = useState(false)
   const [showScorecard, setShowScorecard] = useState(false)
   const [currentProtein, setCurrentProtein] = useState<Protein>(PROTEINS[0])
-  const [selectedLane, setSelectedLane] = useState<BackendId | null>(null)
-  const [controlsOpen, setControlsOpen] = useState(true)
+  const [proteinMenuOpen, setProteinMenuOpen] = useState(false)
+  const [selectedZone, setSelectedZone] = useState<ZoneInfo | null>(null)
   const costIntervals = useRef<Record<string, ReturnType<typeof setInterval>>>({})
 
   const updateLane = useCallback((id: BackendId, update: Partial<LaneStatus>) => {
@@ -156,10 +43,9 @@ export default function App() {
     const backend = BACKENDS.find(b => b.id === backendId)!
     const now = Date.now()
     updateLane(backendId, { state: 'queued', startedAt: now, costAccumulated: 0, result: null, error: null })
-    await delay(300 + Math.random() * 400)
-
+    await delay(200 + Math.random() * 300)
     updateLane(backendId, { state: 'allocating' })
-    await delay(backend.siliconId === 'tpu' ? 600 + Math.random() * 1400 : 1200 + Math.random() * 2500)
+    await delay(backend.siliconId === 'tpu' ? 500 + Math.random() * 1500 : 1000 + Math.random() * 2500)
 
     const costInterval = setInterval(() => {
       setLanes(prev => {
@@ -171,37 +57,20 @@ export default function App() {
     costIntervals.current[backendId] = costInterval
 
     updateLane(backendId, { state: 'pulling' })
-    await delay(500 + Math.random() * 1000)
-
+    await delay(400 + Math.random() * 800)
     updateLane(backendId, { state: 'loading' })
-    await delay(800 + Math.random() * 1500)
-
+    await delay(600 + Math.random() * 1200)
     updateLane(backendId, { state: 'inferring' })
 
-    let result: PredictResponse
-    try {
-      if (backend.apiBase) {
-        const resp = await fetch(`${backend.apiBase}/api/predict`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sequence: protein.sequence, feature_id: protein.id }),
-        })
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-        result = await resp.json()
-      } else {
-        const t = backend.modelId === 'esmfold' ? 1500 + Math.random() * 3000
-          : backend.modelId === 'af2' ? 4000 + Math.random() * 8000
-          : 6000 + Math.random() * 12000
-        await delay(t)
-        result = {
-          pdb: '', plddt_mean: 82 + Math.random() * 14, solve_time_ms: t * (backend.siliconId === 'tpu' ? 0.55 : 1),
-          device_kind: backend.siliconId === 'tpu' ? 'TPU v6e' : 'NVIDIA A100', num_devices: backend.siliconId === 'tpu' ? 4 : 1,
-          seq_len: protein.residueCount, model: backend.modelName,
-        }
-      }
-    } catch (err: any) {
-      clearInterval(costInterval)
-      updateLane(backendId, { state: 'failed', completedAt: Date.now(), costAccumulated: ((Date.now() - now) / 1000) * backend.pricePerSec, error: err.message })
-      return
+    const t = backend.modelId === 'esmfold' ? 1500 + Math.random() * 3000
+      : backend.modelId === 'af2' ? 4000 + Math.random() * 8000
+      : 6000 + Math.random() * 12000
+    await delay(t)
+
+    const result: PredictResponse = {
+      pdb: '', plddt_mean: 82 + Math.random() * 14, solve_time_ms: t * (backend.siliconId === 'tpu' ? 0.55 : 1),
+      device_kind: backend.siliconId === 'tpu' ? 'TPU v6e' : 'NVIDIA A100', num_devices: backend.siliconId === 'tpu' ? 4 : 1,
+      seq_len: protein.residueCount, model: backend.modelName,
     }
 
     clearInterval(costInterval)
@@ -209,92 +78,132 @@ export default function App() {
     updateLane(backendId, { state: 'done', completedAt: done, elapsedMs: done - now, costAccumulated: ((done - now) / 1000) * backend.pricePerSec, result })
   }, [updateLane])
 
-  const handleSubmit = useCallback(async (protein: Protein, models: ModelId[]) => {
+  const handleSubmit = useCallback(async () => {
     setIsRunning(true)
     setShowScorecard(false)
-    setCurrentProtein(protein)
     setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
     Object.values(costIntervals.current).forEach(clearInterval)
     costIntervals.current = {}
-    await Promise.allSettled(BACKENDS.filter(b => models.includes(b.modelId)).map(b => simulateLane(b.id, protein)))
+    const allModels: ModelId[] = ['af2', 'esmfold', 'boltz2']
+    await Promise.allSettled(BACKENDS.filter(b => allModels.includes(b.modelId)).map(b => simulateLane(b.id, currentProtein)))
     setIsRunning(false)
     setShowScorecard(true)
-  }, [simulateLane])
+  }, [simulateLane, currentProtein])
 
-  const nodes = useMemo(() => buildInfraNodes(lanes), [lanes])
-  const edges = useMemo(() => buildInfraEdges(lanes), [lanes])
-  const doneCount = Object.values(lanes).filter(l => l.state === 'done').length
-  const activeCount = Object.values(lanes).filter(l => l.state !== 'idle').length
+  // Compute savings for LocationPaper
+  const tpuTotal = BACKENDS.filter(b => b.siliconId === 'tpu').reduce((s, b) => s + (lanes[b.id]?.costAccumulated || 0), 0)
+  const gpuTotal = BACKENDS.filter(b => b.siliconId === 'gpu').reduce((s, b) => s + (lanes[b.id]?.costAccumulated || 0), 0)
+  const savingsStr = tpuTotal > 0 && gpuTotal > 0 ? `${(gpuTotal / tpuTotal).toFixed(1)}×` : undefined
 
   return (
-    <div className="w-screen h-screen bg-[#060609] text-white overflow-hidden relative">
-      {/* FULLSCREEN: Infrastructure Flow Diagram */}
-      <div className="absolute inset-0">
-        <ReactFlow
-          nodes={nodes} edges={edges}
-          fitView fitViewOptions={{ padding: 0.3 }}
-          proOptions={{ hideAttribution: true }}
-          style={{ background: '#060609' }}
-          nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}
-          panOnDrag={false} zoomOnScroll={false} zoomOnPinch={false} zoomOnDoubleClick={false}
+    <div style={{ width: '100vw', height: '100vh', background: '#171717', overflow: 'hidden', position: 'relative' }}>
+      {/* Fullscreen Google Maps */}
+      <InfraMap lanes={lanes} onZoneClick={setSelectedZone} />
+
+      {/* Top-left: Title + protein selector */}
+      <div style={{ position: 'fixed', top: 16, left: 16, zIndex: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <Dna size={18} color="#09d3ac" />
+          <span style={{ fontFamily: "'Google Sans', sans-serif", fontSize: 14, fontWeight: 700, color: '#09d3ac', letterSpacing: '0.15em', textTransform: 'uppercase' as const }}>
+            Protein Structure Prediction
+          </span>
+          <span style={{ fontFamily: 'Courier New, monospace', fontSize: 10, color: '#708090', marginLeft: 8 }}>
+            NIH Biowulf · TPU vs GPU
+          </span>
+        </div>
+
+        {/* Protein dropdown */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setProteinMenuOpen(!proteinMenuOpen)}
+            style={{
+              background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(9,211,172,0.3)', borderRadius: 4,
+              color: '#09d3ac', fontFamily: 'Courier New, monospace', fontSize: 12,
+              padding: '6px 14px', cursor: 'pointer',
+            }}
+          >
+            {currentProtein.name} ▾
+          </button>
+          {proteinMenuOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, marginTop: 4,
+              background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4,
+              minWidth: 220, zIndex: 30,
+            }}>
+              {PROTEINS.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { setCurrentProtein(p); setProteinMenuOpen(false) }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '8px 14px', border: 'none', cursor: 'pointer',
+                    background: currentProtein.id === p.id ? 'rgba(9,211,172,0.15)' : 'transparent',
+                    color: currentProtein.id === p.id ? '#09d3ac' : '#aaa',
+                    fontFamily: 'Courier New, monospace', fontSize: 11,
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>{p.name}</div>
+                  <div style={{ fontSize: 9, color: '#708090', marginTop: 2 }}>{p.description}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Submit button — fixed bottom center */}
+      <div style={{ position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}>
+        <button
+          onClick={handleSubmit}
+          disabled={isRunning}
+          style={{
+            background: isRunning ? 'rgba(255,255,255,0.05)' : 'rgba(9,211,172,0.12)',
+            border: `1px solid ${isRunning ? 'rgba(255,255,255,0.1)' : 'rgba(9,211,172,0.4)'}`,
+            color: isRunning ? '#666' : '#09d3ac',
+            fontFamily: 'Courier New, monospace', fontSize: 13, fontWeight: 700,
+            padding: '10px 32px', borderRadius: 6, cursor: isRunning ? 'wait' : 'pointer',
+            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+            display: 'flex', alignItems: 'center', gap: 8,
+            backdropFilter: 'blur(8px)',
+          }}
         >
-          <Background color="#ffffff08" gap={40} size={1} />
-        </ReactFlow>
+          <Zap size={16} />
+          {isRunning ? 'Dispatching to Slurm...' : 'Submit All · 6 Jobs'}
+        </button>
       </div>
 
-      {/* HUD — top bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-3 bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
-        <div className="flex items-center gap-3 pointer-events-auto">
-          <Dna size={18} className="text-[#06b6d4]" />
-          <span className="text-sm font-bold tracking-wider text-[#06b6d4]">PROTEIN STRUCTURE PREDICTION</span>
-          <span className="text-[10px] text-white/20 font-mono ml-2">NIH Biowulf · TPU vs GPU</span>
-        </div>
-        <div className="flex items-center gap-4 text-[10px] font-mono text-white/30 pointer-events-auto">
-          <span>{currentProtein.name} · {currentProtein.residueCount} aa</span>
-          {activeCount > 0 && <span className="text-[#06b6d4]">{doneCount}/{activeCount} complete</span>}
-          {isRunning && <span className="text-yellow-400 animate-pulse">● LIVE</span>}
-        </div>
-      </div>
+      {/* Side ladder — right */}
+      <SideLadder lanes={lanes} onSelect={(id) => {}} />
 
-      {/* LEFT OVERLAY — Protein selector (glass) */}
-      <motion.div
-        className="absolute top-16 left-4 z-20 w-64 rounded-xl bg-black/50 backdrop-blur-md border border-white/[0.06] shadow-2xl overflow-hidden"
-        initial={{ x: -280 }} animate={{ x: 0 }} transition={{ duration: 0.4 }}
-      >
-        <ProteinSelector onSubmit={handleSubmit} isRunning={isRunning} />
-      </motion.div>
+      {/* Location paper — bottom left */}
+      <LocationPaper
+        protein={currentProtein}
+        activeZone={selectedZone?.label}
+        totalCost={showScorecard ? tpuTotal : undefined}
+        savings={savingsStr}
+      />
 
-      {/* RIGHT OVERLAY — Backend lanes (glass) */}
-      <motion.div
-        className="absolute top-16 right-4 z-20 w-80 rounded-xl bg-black/50 backdrop-blur-md border border-white/[0.06] shadow-2xl overflow-hidden max-h-[calc(100vh-5rem)]"
-        initial={{ x: 340 }} animate={{ x: 0 }} transition={{ duration: 0.4 }}
-      >
-        <div className="p-4 pb-2">
-          <h2 className="text-white font-sans text-sm font-semibold uppercase tracking-widest mb-1 flex items-center gap-2">
-            <Cpu size={16} className="text-[#00ffcc]" />
-            Accelerator $/calc
-          </h2>
-          <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider">
-            Same protein. Live across silicon.
-          </p>
-        </div>
-        <div className="px-3 pb-3 space-y-1.5 overflow-y-auto max-h-[400px]">
-          {(() => {
-            const doneLanes = BACKENDS.map(b => ({ b, lane: lanes[b.id] })).filter(x => x.lane.state === 'done' && x.lane.costAccumulated > 0)
-            const cheapest = doneLanes.length > 0 ? Math.min(...doneLanes.map(x => x.lane.costAccumulated)) : null
-            return BACKENDS.map(b => (
-              <BackendLane key={b.id} backend={b} status={lanes[b.id]} cheapestCost={cheapest}
-                isSelected={selectedLane === b.id} onSelect={() => setSelectedLane(selectedLane === b.id ? null : b.id)} />
-            ))
-          })()}
-        </div>
-        <AnimatePresence>{showScorecard && <Scorecard lanes={lanes} />}</AnimatePresence>
-      </motion.div>
-
-      {/* BOTTOM — Talk track badge */}
+      {/* Scorecard — appears when all done, top right below ladder */}
       {showScorecard && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
+        <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 20, maxWidth: 320 }}>
+          <Scorecard lanes={lanes} />
+        </div>
+      )}
+
+      {/* Talk track badge */}
+      {showScorecard && (
+        <div style={{ position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}>
           <TalkTrackBadge slide={16} label="This IS the Science Gateway. Researcher picks the science. System picks the silicon." />
+        </div>
+      )}
+
+      {/* Live indicator */}
+      {isRunning && (
+        <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 25, fontFamily: 'Courier New, monospace', fontSize: 10, color: '#eab308' }}>
+          ● LIVE — dispatching to {BACKENDS.length} backends
         </div>
       )}
     </div>

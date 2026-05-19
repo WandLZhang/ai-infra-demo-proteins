@@ -1,0 +1,126 @@
+/* HUD-style animations — ported from hud.jamalmahboob.com */
+
+@keyframes rotatingBoxesAnim1 { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes rotatingBoxesAnim2 { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes rotatingBoxesAnim3 { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+@keyframes locationAnim {
+  0% { filter: blur(20px); opacity: 0; transform: translateY(40px); }
+  100% { filter: blur(0); opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 4px rgba(9, 211, 172, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(9, 211, 172, 0.8); }
+}
+
+/* Rotating marker boxes */
+.marker-outer { position: relative; width: 40px; height: 40px; }
+.rotatingBoxes1 { animation: rotatingBoxesAnim1 2.5s ease infinite; border: 1px solid grey; position: absolute; inset: 0; }
+.rotatingBoxes2 { animation: rotatingBoxesAnim2 2.25s ease infinite; border: 1px solid lightgrey; position: absolute; inset: 0; }
+.rotatingBoxes3 { animation: rotatingBoxesAnim3 2s ease infinite; border: 1px solid darkgrey; position: absolute; inset: 0; }
+
+.marker-active .rotatingBoxes1 { border-color: #eab308; }
+.marker-active .rotatingBoxes2 { border-color: #facc15; }
+.marker-active .rotatingBoxes3 { border-color: #fde047; }
+
+.marker-done .rotatingBoxes1 { border-color: #09d3ac; }
+.marker-done .rotatingBoxes2 { border-color: #10b981; }
+.marker-done .rotatingBoxes3 { border-color: #34d399; }
+.marker-done { animation: pulseGlow 2s ease infinite; }
+
+/* Marker label */
+.marker-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Courier New', monospace;
+  font-size: 8px;
+  color: #708090;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.marker-active .marker-label { color: #eab308; }
+.marker-done .marker-label { color: #09d3ac; }
+
+/* Side ladder */
+.side-ladder { position: fixed; right: 0; top: 50%; transform: translateY(-50%); padding: 5px; z-index: 10; }
+.side-ladder-item {
+  border-left: 8px solid rgba(255,255,255,0.15);
+  padding: 6px 12px;
+  margin: 3px 0;
+  transform: skew(15deg);
+  transition: all 0.45s ease;
+  cursor: pointer;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #aaa;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(4px);
+}
+.side-ladder-item:hover { background: #708090; transform: translateX(-25px) skew(15deg); transition: all 0.15s ease; }
+.side-ladder-item > * { transform: skew(-15deg); display: block; }
+
+.side-ladder-item.active { border-left-color: #eab308; color: #eab308; }
+.side-ladder-item.done { border-left-color: #09d3ac; color: #fff; }
+.side-ladder-item.done:hover { background: rgba(9, 211, 172, 0.15); }
+
+.side-ladder-ms { font-size: 9px; color: #708090; margin-top: 2px; }
+.side-ladder-item.done .side-ladder-ms { color: #09d3ac; }
+
+/* Location paper — bottom left */
+.location-paper {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  padding: 20px 30px;
+  z-index: 10;
+  backdrop-filter: blur(10px);
+  max-width: 40vw;
+}
+.location-paper::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px;
+  height: 100%;
+  background: rgba(255,255,255,0.1);
+  transform: skew(-15deg);
+}
+.location-paper-region {
+  animation: locationAnim 2.5s ease;
+  animation-delay: 0.25s;
+  animation-fill-mode: both;
+  color: #708090;
+  font-size: 1vw;
+  font-family: 'Google Sans', 'Roboto', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+.location-paper-name {
+  animation: locationAnim 2.5s ease;
+  animation-fill-mode: both;
+  font-size: 3.5vw;
+  font-family: 'Google Sans', 'Roboto', sans-serif;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.location-paper-name::after {
+  content: '';
+  display: block;
+  border-bottom: 1px solid grey;
+  width: 125%;
+  margin-top: 8px;
+}
+.location-paper-coords {
+  animation: locationAnim 2.5s ease;
+  animation-delay: 0.65s;
+  animation-fill-mode: both;
+  color: #708090;
+  font-size: 1.2vw;
+  font-family: 'Courier New', monospace;
+  margin-top: 8px;
+}
