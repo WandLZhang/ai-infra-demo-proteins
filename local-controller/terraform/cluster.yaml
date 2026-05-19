@@ -55,10 +55,6 @@ deployment_groups:
     source: modules/network/pre-existing-vpc
     settings: { network_name: default, subnetwork_name: default, region: us-east1 }
 
-  - id: default_vpc_west4
-    source: modules/network/pre-existing-vpc
-    settings: { network_name: default, subnetwork_name: default, region: europe-west4 }
-
   # GCS bucket for model weights, MSAs, results
   - id: gcs_bucket
     source: modules/file-system/cloud-storage-bucket
@@ -110,22 +106,6 @@ deployment_groups:
       enable_placement: false
       node_conf: { Feature: tpu-v6e, Weight: 2 }
 
-  # TPU v6e Spot — europe-west4-a (4,609 capacity)
-  - id: tpu_v6e_west4a
-    source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
-    use: [default_vpc_west4]
-    settings:
-      machine_type: ct6e-standard-4t
-      region: europe-west4
-      zone: europe-west4-a
-      enable_public_ips: false
-      enable_spot_vm: true
-      spot_instance_config: { termination_action: STOP }
-      node_count_static: 0
-      node_count_dynamic_max: 2
-      enable_placement: false
-      node_conf: { Feature: tpu-v6e, Weight: 3 }
-
   # TPU v6e Spot — us-east5-a (4,356 capacity)
   - id: tpu_v6e_east5a
     source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
@@ -140,7 +120,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      node_conf: { Feature: tpu-v6e, Weight: 4 }
+      node_conf: { Feature: tpu-v6e, Weight: 3 }
 
   # TPU v6e Spot — us-central1-b (3,800 capacity)
   - id: tpu_v6e_central1b
@@ -156,7 +136,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      node_conf: { Feature: tpu-v6e, Weight: 5 }
+      node_conf: { Feature: tpu-v6e, Weight: 4 }
 
   # TPU v6e Spot — us-east1-d (2,690 capacity)
   - id: tpu_v6e_east1d
@@ -172,7 +152,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      node_conf: { Feature: tpu-v6e, Weight: 6 }
+      node_conf: { Feature: tpu-v6e, Weight: 5 }
 
   # ===================================================================
   # GPU A100 Spot nodesets — for AF2-GPU, ESMFold-GPU, Boltz-2-GPU
@@ -221,12 +201,11 @@ deployment_groups:
   - id: tpu_partition
     source: community/modules/compute/schedmd-slurm-gcp-v6-partition
     use:
-    - tpu_v6e_west1c       # W1
-    - tpu_v6e_east5b       # W2
-    - tpu_v6e_west4a       # W3
-    - tpu_v6e_east5a       # W4
-    - tpu_v6e_central1b    # W5
-    - tpu_v6e_east1d       # W6
+    - tpu_v6e_west1c       # W1 — 22,652 Spot capacity
+    - tpu_v6e_east5b       # W2 — 7,066
+    - tpu_v6e_east5a       # W3 — 4,356
+    - tpu_v6e_central1b    # W4 — 3,800
+    - tpu_v6e_east1d       # W5 — 2,690
     settings:
       partition_name: tpu
       exclusive: false
