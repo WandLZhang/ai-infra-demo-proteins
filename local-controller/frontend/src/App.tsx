@@ -1,377 +1,248 @@
-import React, { useState, useCallback, useEffect, Suspense } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Environment, useProgress } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom, ChromaticAberration, Noise, Vignette } from '@react-three/postprocessing'
 import { Vector2 } from 'three'
 import { BlendFunction } from 'postprocessing'
-import { Plane, Cpu, Sparkles } from 'lucide-react'
+import { Dna, Activity, Cpu } from 'lucide-react'
 
-import ControlPanel from './components/ControlPanel'
-import SensorReadings from './components/SensorReadings'
-import AiAnalysisPanel from './components/AiAnalysisPanel'
-import AcceleratorComparison from './components/AcceleratorComparison'
-import FineTunePage from './components/FineTunePage'
-import JetModel from './components/JetModel'
-import StreamlineRenderer from './components/StreamlineRenderer'
+import ProteinSelector, { PROTEINS } from './components/ProteinSelector'
+import BackendLane from './components/BackendLane'
+import Scorecard from './components/Scorecard'
+import TalkTrackBadge from './components/TalkTrackBadge'
 import TpuMetricsModal from './components/TpuMetricsModal'
-import { useParticleStream } from './hooks/useParticleStream'
-import { runSimulation, fetchResultsList, fetchResult, pollResultStatus } from './api'
-import type { VisualizationMode, WindParams, SensorData, SimulationResult, ResultSummary } from './types'
+import type { Protein, ModelId, BackendId, LaneStatus, LaneState, PredictResponse } from './types'
+import { BACKENDS } from './backends'
 
-function Loader() {
-  const { progress } = useProgress()
-  return (
-    <mesh>
-      <boxGeometry args={[0, 0, 0]} />
-      <meshBasicMaterial />
-    </mesh>
-  )
-}
-
-/**
- * Scene layout:
- * - GLTF model rendered with Cp mapped via nearest-centroid interpolation
- * - Streamlines in solver coordinate frame, same rotation as GLTF model
- * - Alpha/beta handled by the solver (flow direction), NOT visual rotation
- */
-function AircraftScene({
-  mode, speed, mach, solverCentroids, cpValues, cpRange,
-  trails, trailLengths, writeHeads, particleCount, streamConnected,
-}: {
-  mode: VisualizationMode
-  speed: number
-  mach: number
-  solverCentroids: number[] | null
-  cpValues: number[] | null
-  cpRange: [number, number]
-  trails: Float32Array
-  trailLengths: Int32Array
-  writeHeads: Int32Array
-  particleCount: number
-  streamConnected: boolean
-}) {
+function ProteinScene() {
   return (
     <group>
-      <JetModel
-        mode={mode}
-        speed={speed}
-        mach={mach}
-        solverCentroids={solverCentroids}
-        cpValues={cpValues}
-        cpRange={cpRange}
-      />
-
-      {/* Animated streamlines — same rotation as the GLTF model */}
-      <group rotation={[0, -Math.PI / 2, 0]}>
-        <StreamlineRenderer
-          trails={trails}
-          trailLengths={trailLengths}
-          writeHeads={writeHeads}
-          particleCount={particleCount}
-          connected={streamConnected}
+      <mesh rotation={[0, 0, 0]}>
+        <torusKnotGeometry args={[1.2, 0.35, 200, 32, 2, 3]} />
+        <meshStandardMaterial
+          color="#4ade80"
+          emissive="#065f46"
+          emissiveIntensity={0.4}
+          roughness={0.3}
+          metalness={0.6}
         />
-      </group>
+      </mesh>
+      <ambientLight intensity={0.3} />
+      <directionalLight position={[5, 5, 5]} intensity={0.8} />
+      <pointLight position={[-3, -3, 2]} intensity={0.4} color="#06b6d4" />
     </group>
   )
 }
 
-export default function App() {
-  const [wind, setWind] = useState<WindParams>({ speed: 0.5, alpha: 5, beta: 0 })
-  const [mode, setMode] = useState<VisualizationMode>('pressure')
-  const [particleDensity, setParticleDensity] = useState(30)
-  const [meshResolution, setMeshResolution] = useState(800)
-  const [simulating, setSimulating] = useState(false)
-  const [solverCentroids, setSolverCentroids] = useState<number[] | null>(null)
-  const [cpValues, setCpValues] = useState<number[] | null>(null)
-  const [cpRange, setCpRange] = useState<[number, number]>([-1.5, 1.0])
-  const [simResult, setSimResult] = useState<SimulationResult | null>(null)
-  const [simError, setSimError] = useState<string | null>(null)
-  const [metricsOpen, setMetricsOpen] = useState(false)
-  const [resultsList, setResultsList] = useState<ResultSummary[]>([])
-  const [loadingResult, setLoadingResult] = useState(false)
-  const [gcsPath, setGcsPath] = useState<string | null>(null)
-  const [simulatingVisible, setSimulatingVisible] = useState(false)
-  const [uploadReady, setUploadReady] = useState(false)
-  const [streamParams, setStreamParams] = useState<{ mach: number; alpha: number; beta: number; particleCount: number } | null>(null)
-  // Bumped on every Simulate click so AcceleratorComparison can re-fan out.
-  const [comparisonTrigger, setComparisonTrigger] = useState(0)
-  // Top-right "Fine-tune" button toggles the Part 2 overlay (full-screen).
-  const [finetuneOpen, setFinetuneOpen] = useState(false)
-
-  const particleCount = Math.floor(Math.pow(10, 2 + (particleDensity / 100) * 2.5))
-  const hasSimData = simResult !== null
-
-  const streamState = useParticleStream(hasSimData, streamParams)
-
-  const sensorData: SensorData = {
-    liftCoeff: simResult?.forces.liftCoeff ?? 0,
-    dragCoeff: simResult?.forces.dragCoeff ?? 0,
-    lift: simResult?.forces.lift ?? 0,
-    drag: simResult?.forces.drag ?? 0,
-    dynamicPressure: 0.5 * 1.225 * Math.pow(wind.speed * 343, 2) / 1000,
-    maxSurfaceTemp: 15 * (1 + 0.2 * wind.speed * wind.speed),
-    structuralLoad: simResult ? Math.abs(simResult.forces.lift) / (9.81 * 19700) : 0,
-    airDensity: 1.225,
+function initLaneStatus(backendId: BackendId): LaneStatus {
+  const b = BACKENDS.find(b => b.id === backendId)!
+  return {
+    backendId,
+    state: 'idle',
+    startedAt: null,
+    completedAt: null,
+    elapsedMs: 0,
+    costAccumulated: 0,
+    result: null,
+    error: null,
+    talkTrackSlide: b.talkTrackSlide,
+    talkTrackLabel: b.talkTrackLabel,
   }
+}
 
-  const doSimulate = useCallback(async () => {
-    setSimulating(true)
-    setSimulatingVisible(false)
-    setSimError(null)
-    setGcsPath(null)
-    setUploadReady(false)
-    setComparisonTrigger(t => t + 1)  // fan out to comparison backends
+export default function App() {
+  const [lanes, setLanes] = useState<Record<BackendId, LaneStatus>>(
+    Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>
+  )
+  const [selectedLane, setSelectedLane] = useState<BackendId | null>(null)
+  const [isRunning, setIsRunning] = useState(false)
+  const [showScorecard, setShowScorecard] = useState(false)
+  const [metricsOpen, setMetricsOpen] = useState(false)
+  const [currentProtein, setCurrentProtein] = useState<Protein>(PROTEINS[0])
+  const costIntervals = useRef<Record<string, ReturnType<typeof setInterval>>>({})
 
-    // Only show "Simulating..." after 500ms to avoid flicker on fast solves
-    const showTimer = setTimeout(() => setSimulatingVisible(true), 500)
-
-    try {
-      const result = await runSimulation({
-        wind,
-        particleCount: Math.min(particleCount, 200),
-        meshResolution,
-      })
-      setSimResult(result)
-      setStreamParams({ mach: wind.speed, alpha: wind.alpha, beta: wind.beta, particleCount: Math.min(particleCount, 200) })
-      if (result.faceData?.cp) {
-        setCpValues(result.faceData.cp)
-        setCpRange((() => {
-          // Symmetric (Cp=0 centered) diverging colormap — the CFD standard.
-          // Without this, the colormap midpoint lands at the median of the Cp
-          // distribution rather than at Cp=0, so suction (negative) and pressure
-          // (positive) regions don't look distinct — they all map to GREEN-YELLOW.
-          // Centering on 0 puts SUCTION on the BLUE half and PRESSURE on the RED
-          // half, which is what aerospace audiences expect to see.
-          // Range half-width = max(|p5|, |p95|), clamped to [0.6, 1.5] so the
-          // visualization always has reasonable contrast.
-          const p5 = result.faceData.cpP5 ?? result.faceData.cpMin ?? -1.0
-          const p95 = result.faceData.cpP95 ?? result.faceData.cpMax ?? 1.0
-          const half = Math.min(Math.max(Math.abs(p5), Math.abs(p95), 0.6), 1.5)
-          return [-half, half]
-        })())
-        setSolverCentroids(result.faceData.centroids)
-      }
-      // Poll for GCS upload completion, then set gcsPath for AI
-      if (result.result_id) {
-        pollResultStatus(result.result_id).then(status => {
-          if (status === 'ready') {
-            fetchResultsList().then(({ results }) => {
-              setResultsList(results)
-              const entry = results.find(r => r.result_id === result.result_id)
-              if (entry) {
-                setGcsPath(entry.gcs_path)
-                setUploadReady(true)
-              }
-            })
-          } else {
-            // GCS upload failed — fall back to inline analysis
-            console.warn('GCS upload failed, falling back to inline analysis')
-            setUploadReady(true)
-          }
-        })
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      console.error('Simulation failed:', msg)
-      setSimError(msg)
-    } finally {
-      clearTimeout(showTimer)
-      setSimulating(false)
-      setSimulatingVisible(false)
-    }
-  }, [wind, particleCount, meshResolution])
-
-  const loadResult = useCallback(async (resultId: string) => {
-    setLoadingResult(true)
-    try {
-      const result = await fetchResult(resultId)
-      setSimResult(result)
-      if (result.faceData?.cp) {
-        setCpValues(result.faceData.cp)
-        setCpRange((() => {
-          // Symmetric (Cp=0 centered) diverging colormap — the CFD standard.
-          // Without this, the colormap midpoint lands at the median of the Cp
-          // distribution rather than at Cp=0, so suction (negative) and pressure
-          // (positive) regions don't look distinct — they all map to GREEN-YELLOW.
-          // Centering on 0 puts SUCTION on the BLUE half and PRESSURE on the RED
-          // half, which is what aerospace audiences expect to see.
-          // Range half-width = max(|p5|, |p95|), clamped to [0.6, 1.5] so the
-          // visualization always has reasonable contrast.
-          const p5 = result.faceData.cpP5 ?? result.faceData.cpMin ?? -1.0
-          const p95 = result.faceData.cpP95 ?? result.faceData.cpMax ?? 1.0
-          const half = Math.min(Math.max(Math.abs(p5), Math.abs(p95), 0.6), 1.5)
-          return [-half, half]
-        })())
-        setSolverCentroids(result.faceData.centroids)
-      }
-      // Update sliders to match loaded result
-      const loadedAlpha = result.alpha ?? wind.alpha
-      const loadedBeta = result.beta ?? wind.beta
-      setWind({ speed: result.mach, alpha: loadedAlpha, beta: loadedBeta })
-      setStreamParams({ mach: result.mach, alpha: loadedAlpha, beta: loadedBeta, particleCount: Math.min(particleCount, 200) })
-
-      // Find the gcs_path for AI
-      const entry = resultsList.find(r => r.result_id === resultId)
-      if (entry) {
-        setGcsPath(entry.gcs_path)
-        setUploadReady(true)
-      }
-    } catch (err) {
-      console.error('Failed to load result:', err)
-    } finally {
-      setLoadingResult(false)
-    }
-  }, [resultsList, wind.alpha, wind.beta])
-
-  useEffect(() => {
-    fetchResultsList().then(({ results }) => setResultsList(results)).catch(() => {})
+  const updateLane = useCallback((id: BackendId, update: Partial<LaneStatus>) => {
+    setLanes(prev => ({ ...prev, [id]: { ...prev[id], ...update } }))
   }, [])
 
+  const simulateLane = useCallback(async (backendId: BackendId, protein: Protein) => {
+    const backend = BACKENDS.find(b => b.id === backendId)!
+    const now = Date.now()
+
+    updateLane(backendId, { state: 'queued', startedAt: now, costAccumulated: 0, result: null, error: null })
+    await delay(300 + Math.random() * 200)
+
+    updateLane(backendId, { state: 'allocating' })
+    const allocDelay = backend.siliconId === 'tpu' ? 800 + Math.random() * 1200 : 1500 + Math.random() * 2000
+    await delay(allocDelay)
+
+    const costInterval = setInterval(() => {
+      setLanes(prev => {
+        const lane = prev[backendId]
+        if (lane.state === 'done' || lane.state === 'failed' || lane.state === 'idle') return prev
+        const elapsed = (Date.now() - (lane.startedAt || now)) / 1000
+        return { ...prev, [backendId]: { ...lane, costAccumulated: elapsed * backend.pricePerSec } }
+      })
+    }, 100)
+    costIntervals.current[backendId] = costInterval
+
+    updateLane(backendId, { state: 'pulling' })
+    await delay(600 + Math.random() * 800)
+
+    updateLane(backendId, { state: 'loading' })
+    await delay(1000 + Math.random() * 1500)
+
+    updateLane(backendId, { state: 'inferring' })
+
+    let result: PredictResponse
+    try {
+      if (backend.apiBase) {
+        const resp = await fetch(`${backend.apiBase}/api/predict`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sequence: protein.sequence, feature_id: protein.id }),
+        })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        result = await resp.json()
+      } else {
+        const inferDelay = backend.modelId === 'esmfold' ? 2000 + Math.random() * 3000
+          : backend.modelId === 'af2' ? 5000 + Math.random() * 10000
+          : 8000 + Math.random() * 15000
+        await delay(inferDelay)
+        const tpuSpeedFactor = backend.siliconId === 'tpu' ? 0.6 : 1.0
+        result = {
+          pdb: '',
+          plddt_mean: 85 + Math.random() * 10,
+          plddt_min: 60 + Math.random() * 20,
+          plddt_max: 92 + Math.random() * 6,
+          solve_time_ms: inferDelay * tpuSpeedFactor,
+          device_kind: backend.siliconId === 'tpu' ? 'TPU v6e' : 'NVIDIA A100-SXM4-40GB',
+          num_devices: backend.siliconId === 'tpu' ? 4 : 1,
+          seq_len: protein.residueCount,
+          model: backend.modelName,
+        }
+      }
+    } catch (err: any) {
+      clearInterval(costInterval)
+      const elapsed = (Date.now() - now) / 1000
+      updateLane(backendId, {
+        state: 'failed', completedAt: Date.now(),
+        costAccumulated: elapsed * backend.pricePerSec, error: err.message,
+      })
+      return
+    }
+
+    clearInterval(costInterval)
+    const completedAt = Date.now()
+    const totalElapsed = (completedAt - now) / 1000
+    updateLane(backendId, {
+      state: 'done', completedAt, elapsedMs: totalElapsed * 1000,
+      costAccumulated: totalElapsed * backend.pricePerSec, result,
+    })
+  }, [updateLane])
+
+  const handleSubmit = useCallback(async (protein: Protein, models: ModelId[]) => {
+    setIsRunning(true)
+    setShowScorecard(false)
+    setCurrentProtein(protein)
+    const resetLanes = Object.fromEntries(
+      BACKENDS.map(b => [b.id, initLaneStatus(b.id)])
+    ) as Record<BackendId, LaneStatus>
+    setLanes(resetLanes)
+    Object.values(costIntervals.current).forEach(clearInterval)
+    costIntervals.current = {}
+
+    const activeBackends = BACKENDS.filter(b => models.includes(b.modelId))
+    await Promise.allSettled(activeBackends.map(b => simulateLane(b.id, protein)))
+    setIsRunning(false)
+    setShowScorecard(true)
+  }, [simulateLane])
+
+  const doneCount = Object.values(lanes).filter(l => l.state === 'done').length
+  const activeCount = Object.values(lanes).filter(l => l.state !== 'idle').length
+
   return (
-    <div className="w-full h-screen bg-[#020202] overflow-hidden selection:bg-[#00ffcc] selection:text-black">
-      {/* HUD Overlay */}
-      <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-6">
-        {/* Header */}
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-[#00ffcc] font-mono text-2xl font-bold tracking-tighter flex items-center gap-3">
-              <Plane size={24} />
-              Gemini for AERO-SIM // F-22
-            </h1>
-            <p className="text-white/40 font-sans text-xs uppercase tracking-[0.3em] mt-1 ml-9">
-              Hess-Smith Panel Method
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setMetricsOpen(true)}
-              className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 border border-[#00ffcc]/20 bg-[#00ffcc]/5 hover:bg-[#00ffcc]/10 rounded-full transition-colors cursor-pointer"
-              title="TPU Compute Metrics"
-            >
-              <Cpu size={14} className="text-[#00ffcc]" />
-              <span className="text-[#00ffcc] font-mono text-[10px] uppercase tracking-wider">Metrics</span>
-            </button>
-            <button
-              onClick={() => setFinetuneOpen(true)}
-              className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 border border-emerald-400/40 bg-emerald-400/10 hover:bg-emerald-400/20 rounded-full transition-colors cursor-pointer"
-              title="Fine-tune Gemma 3 on aerospace imagery (Part 2 of the demo)"
-            >
-              <Sparkles size={14} className="text-emerald-300" />
-              <span className="text-emerald-300 font-mono text-[10px] uppercase tracking-wider">Fine-tune</span>
-            </button>
-            <div className="flex items-center gap-2 px-3 py-1 border border-[#00ffcc]/30 bg-[#00ffcc]/5 rounded-full">
-              <div className={`w-2 h-2 rounded-full ${
-                simulatingVisible ? 'bg-yellow-500 animate-pulse' : hasSimData ? 'bg-[#00ffcc]' : 'bg-red-500'
-              }`} />
-              <span className="text-[#00ffcc] font-mono text-xs uppercase tracking-wider">
-                {simulatingVisible ? 'Computing...' : hasSimData ? `Live (${simResult!.solveTimeMs.toFixed(0)}ms / ${simResult!.panelCount} panels)` : 'Ready'}
-              </span>
-            </div>
+    <div className="w-screen h-screen bg-[#0a0a0f] text-white overflow-hidden flex">
+      {/* LEFT — Protein selector */}
+      <div className="w-72 flex-shrink-0 border-r border-white/5 overflow-y-auto">
+        <div className="p-4 border-b border-white/5 flex items-center gap-2">
+          <Dna size={18} className="text-emerald-400" />
+          <span className="text-sm font-bold tracking-wide">PROTEIN DEMO</span>
+          <span className="text-[10px] text-white/30 ml-auto font-mono">NIH Biowulf</span>
+        </div>
+        <ProteinSelector onSubmit={handleSubmit} isRunning={isRunning} />
+      </div>
+
+      {/* CENTER — 3D Viewer with F-22 post-processing */}
+      <div className="flex-1 relative">
+        <Canvas camera={{ position: [0, 0, 4], fov: 50 }} className="absolute inset-0">
+          <ProteinScene />
+          <OrbitControls enableDamping dampingFactor={0.05} />
+          <EffectComposer>
+            <Bloom intensity={0.4} luminanceThreshold={0.6} luminanceSmoothing={0.9} />
+            <ChromaticAberration offset={new Vector2(0.0005, 0.0005)} blendFunction={BlendFunction.NORMAL} />
+            <Noise opacity={0.04} blendFunction={BlendFunction.OVERLAY} />
+            <Vignette eskil={false} offset={0.1} darkness={0.8} />
+          </EffectComposer>
+        </Canvas>
+
+        {/* HUD overlay */}
+        <div className="absolute top-4 left-4 z-10">
+          <div className="text-[10px] font-mono text-white/30 space-y-0.5">
+            <div>slurmctld @ wz-nih-demo-controller</div>
+            <div>{currentProtein.name} · {currentProtein.residueCount} residues</div>
+            <div>{activeCount > 0 ? `${doneCount}/${activeCount} backends complete` : 'idle'}</div>
           </div>
         </div>
 
-        {/* Error message */}
-        {simError && (
-          <div className="mx-auto mt-2 px-4 py-2 bg-red-500/20 border border-red-500/50 rounded-lg pointer-events-auto">
-            <p className="text-red-400 font-mono text-xs">{simError}</p>
+        {showScorecard && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+            <TalkTrackBadge
+              slide={16}
+              label="This IS the Science Gateway. Researcher picks the science. System picks the silicon."
+            />
           </div>
         )}
 
-        {/* Bottom panels — control panel only on the left, right column moved up */}
-        <div className="flex justify-between items-end w-full flex-1 min-h-0 pb-4">
-          <ControlPanel
-            wind={wind}
-            onWindChange={setWind}
-            particleDensity={particleDensity}
-            onParticleDensityChange={setParticleDensity}
-            meshResolution={meshResolution}
-            onMeshResolutionChange={setMeshResolution}
-            mode={mode}
-            onModeChange={setMode}
-            simulating={simulating}
-            onSimulate={doSimulate}
-            results={resultsList}
-            onLoadResult={loadResult}
-            loadingResult={loadingResult}
-          />
+        <button
+          onClick={() => setMetricsOpen(true)}
+          className="absolute top-4 right-4 z-10 p-2 rounded bg-white/5 hover:bg-white/10 transition-colors"
+          title="TPU/GPU Metrics"
+        >
+          <Cpu size={14} className="text-white/40" />
+        </button>
+      </div>
+
+      {/* RIGHT — Backend lanes */}
+      <div className="w-96 flex-shrink-0 border-l border-white/5 flex flex-col">
+        <div className="p-4 border-b border-white/5 flex items-center gap-2">
+          <Activity size={14} className="text-cyan-400" />
+          <span className="text-xs font-mono uppercase tracking-widest text-white/60">Backend Lanes</span>
+          {isRunning && (
+            <span className="ml-auto text-[10px] font-mono text-yellow-400 animate-pulse">LIVE</span>
+          )}
         </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {BACKENDS.map(b => (
+            <BackendLane
+              key={b.id}
+              backend={b}
+              status={lanes[b.id]}
+              isSelected={selectedLane === b.id}
+              onSelect={() => setSelectedLane(selectedLane === b.id ? null : b.id)}
+            />
+          ))}
+        </div>
+
+        {showScorecard && <Scorecard lanes={lanes} />}
       </div>
 
-      {/* Right column — pinned top-right, below header; Gemini → Sensor (collapsed) → Accelerator $/calc */}
-      <div className="absolute top-20 right-6 z-20 w-96 flex flex-col gap-4 pointer-events-auto max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden">
-        <AiAnalysisPanel simResult={simResult} wind={wind} gcsPath={gcsPath} uploadReady={uploadReady} />
-        <SensorReadings
-          data={sensorData}
-          solveTimeMs={simResult?.solveTimeMs}
-          computeDevice={simResult?.computeDevice}
-        />
-        <AcceleratorComparison
-          triggerKey={comparisonTrigger}
-          wind={wind}
-          particleCount={particleCount}
-          meshResolution={meshResolution}
-        />
-      </div>
-
-      {/* TPU Metrics Modal */}
-      <TpuMetricsModal
-        open={metricsOpen}
-        onClose={() => setMetricsOpen(false)}
-        latestTimings={simResult?.timings}
-        computeDevice={simResult?.computeDevice}
-      />
-
-      {/* Part 2 — Fine-tune full-screen overlay */}
-      <FineTunePage open={finetuneOpen} onClose={() => setFinetuneOpen(false)} />
-
-      {/* 3D Scene */}
-      <Canvas camera={{ position: [-10, 4, 10], fov: 45 }}>
-        <color attach="background" args={['#020202']} />
-        <fog attach="fog" args={['#020202', 10, 60]} />
-        <ambientLight intensity={mode === 'visual' ? 1.5 : 0.4} />
-        <directionalLight position={[10, 10, 5]} intensity={mode === 'visual' ? 2 : 1.0} />
-        <directionalLight position={[-10, -10, -5]} intensity={0.5} />
-
-        <Suspense fallback={<Loader />}>
-          {mode === 'visual' && <Environment preset="city" />}
-          <AircraftScene
-            mode={mode}
-            speed={wind.speed}
-            mach={simResult?.mach ?? wind.speed}
-            solverCentroids={solverCentroids}
-            cpValues={cpValues}
-            cpRange={cpRange}
-            trails={streamState.trails}
-            trailLengths={streamState.trailLengths}
-            writeHeads={streamState.writeHeads}
-            particleCount={streamState.particleCount}
-            streamConnected={streamState.connected}
-          />
-
-          <EffectComposer>
-            <Bloom
-              luminanceThreshold={mode === 'visual' ? 0.8 : 0.7}
-              luminanceSmoothing={0.9}
-              intensity={mode === 'visual' ? 1 : 0.8}
-            />
-            <ChromaticAberration
-              blendFunction={BlendFunction.NORMAL}
-              offset={new Vector2(0.001 * wind.speed, 0.001 * wind.speed)}
-            />
-            <Noise opacity={0.03} />
-            <Vignette eskil={false} offset={0.1} darkness={1.1} />
-          </EffectComposer>
-        </Suspense>
-
-        <OrbitControls
-          enablePan={false}
-          enableZoom={true}
-          minDistance={1}
-          maxDistance={30}
-          maxPolarAngle={Math.PI / 1.5}
-          autoRotate={false}
-        />
-      </Canvas>
+      {metricsOpen && <TpuMetricsModal onClose={() => setMetricsOpen(false)} />}
     </div>
   )
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }

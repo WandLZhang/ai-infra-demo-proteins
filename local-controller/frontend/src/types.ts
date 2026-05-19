@@ -1,66 +1,73 @@
-export type VisualizationMode = 'visual' | 'thermal' | 'stress' | 'pressure'
+// Protein demo types — replaces aero-sim's wind/face/force types.
+// Keeps the same TpuMetrics shape so TpuMetricsModal works unchanged.
 
-export interface WindParams {
-  speed: number       // Mach number
-  alpha: number       // Angle of attack (degrees)
-  beta: number        // Sideslip angle (degrees)
+export interface Protein {
+  id: string
+  name: string
+  sequence: string
+  uniprotId: string
+  description: string
+  residueCount: number
 }
 
-export interface SimulationRequest {
-  wind: WindParams
-  particleCount: number
-  meshResolution: number
+export type ModelId = 'af2' | 'esmfold' | 'boltz2'
+export type SiliconId = 'tpu' | 'gpu'
+export type BackendId = `${ModelId}-${SiliconId}`
+
+export interface PredictRequest {
+  sequence: string
+  featureId?: string  // for AF2 (pre-computed MSA features)
 }
 
-export interface FaceData {
-  cp: number[]
-  cpMin: number
-  cpMax: number
-  cpP5: number    // 5th percentile — robust colormap range
-  cpP95: number   // 95th percentile
-  velocity: number[]
-  normals: number[]
-  centroids: number[]
+export interface PredictResponse {
+  pdb: string
+  plddt_mean: number
+  plddt_min?: number
+  plddt_max?: number
+  solve_time_ms: number
+  device_kind: string
+  num_devices: number
+  seq_len: number
+  model?: string
+  result_id?: string
 }
 
-export interface SolverMesh {
-  vertices: number[]   // flat [x,y,z, ...]
-  faces: number[]      // flat [i0,i1,i2, ...]
-  faceCount: number
-  vertexCount: number
+// Each backend lane tracks its lifecycle state
+export type LaneState =
+  | 'idle'
+  | 'queued'
+  | 'allocating'    // Spot allocation in progress
+  | 'pulling'       // Container image pull
+  | 'loading'       // Model weights loading
+  | 'inferring'     // Forward pass running
+  | 'done'
+  | 'failed'
+
+export interface LaneStatus {
+  backendId: BackendId
+  state: LaneState
+  startedAt: number | null
+  completedAt: number | null
+  elapsedMs: number
+  costAccumulated: number
+  result: PredictResponse | null
+  error: string | null
+  talkTrackSlide: number
+  talkTrackLabel: string
 }
 
-export interface ForceData {
-  lift: number
-  drag: number
-  sideForce: number
-  liftCoeff: number
-  dragCoeff: number
-  dragParasite: number
-  dragInduced: number
-  dragWave: number
-  liftOverDrag: number
-  liftCurveSlope: number
-  stallAngle: number
+// Talk track badge mapping — each element maps to a slide
+export interface TalkTrackPoint {
+  slide: number
+  label: string
+  description: string
+  triggeredBy: LaneState | 'summary'
 }
 
-export interface SimulationResult {
-  faceData: FaceData
-  solverMesh: SolverMesh
-  forces: ForceData
-  computeDevice: string
-  solveTimeMs: number
-  panelCount: number
-  mach: number
-  timings?: Record<string, number>
-  result_id?: string | null
-  alpha?: number
-  beta?: number
-}
-
+// Reused from aero-sim — TpuMetrics modal
 export interface TpuMetrics {
   devices: Array<{ id: number; platform: string; device_kind: string }>
-  platform: {
+  platform?: {
     default_backend: string
     device_count: number
     platforms_available: string[]
@@ -68,41 +75,16 @@ export interface TpuMetrics {
     float64_enabled: boolean
     jax_platforms_env: string
   }
-  xla_cache: {
-    enabled: boolean
-    directory: string
-    type: string
-  }
-  solver: Record<string, unknown>
-  timings: {
-    latest?: Record<string, number>
-    averages?: Record<string, { mean: number; min: number; max: number }>
-    run_count?: number
-  }
-  memory: Record<string, { bytes_in_use: number; bytes_limit: number; peak_bytes_in_use: number; utilization_pct: number } | { note: string }>
-  uptime: { seconds_since_first_sim?: number }
-  benchmark: Record<string, number | string>
+  num_devices: number
+  jax_version?: string
+  torch_version?: string
+  warm: boolean
+  warm_error: string | null
 }
 
-export interface SensorData {
-  maxSurfaceTemp: number
-  dynamicPressure: number
-  structuralLoad: number
-  airDensity: number
-  liftCoeff: number
-  dragCoeff: number
-  lift: number
-  drag: number
-}
-
-export interface ResultSummary {
-  result_id: string
-  ts: string
-  session: string
-  gcs_path: string
-  mach: number
-  alpha: number
-  beta: number
-  panels: number
-  solve_ms: number
+export interface ScorecardRow {
+  model: string
+  tpuCost: number
+  gpuCost: number
+  savings: string
 }
