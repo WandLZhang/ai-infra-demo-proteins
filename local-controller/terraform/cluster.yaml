@@ -88,7 +88,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      disk_type: pd-ssd
+      disk_type: hyperdisk-balanced
       enable_shielded_vm: true
       shielded_instance_config:
         enable_secure_boot: true
@@ -110,7 +110,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      disk_type: pd-ssd
+      disk_type: hyperdisk-balanced
       enable_shielded_vm: true
       shielded_instance_config:
         enable_secure_boot: true
@@ -132,7 +132,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      disk_type: pd-ssd
+      disk_type: hyperdisk-balanced
       enable_shielded_vm: true
       shielded_instance_config:
         enable_secure_boot: true
@@ -154,7 +154,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      disk_type: pd-ssd
+      disk_type: hyperdisk-balanced
       enable_shielded_vm: true
       shielded_instance_config:
         enable_secure_boot: true
@@ -176,7 +176,7 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
-      disk_type: pd-ssd
+      disk_type: hyperdisk-balanced
       enable_shielded_vm: true
       shielded_instance_config:
         enable_secure_boot: true
@@ -284,7 +284,7 @@ deployment_groups:
     - gcs_bucket
     settings:
       enable_controller_public_ips: false
-      disk_type: pd-ssd
+      disk_type: hyperdisk-balanced
       disk_size_gb: 200
       machine_type: n2-standard-8
       enable_external_prolog_epilog: true
