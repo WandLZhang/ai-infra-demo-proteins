@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { motion } from 'motion/react'
-import { Dna, FlaskConical, Zap } from 'lucide-react'
+import { Dna, Zap } from 'lucide-react'
 import type { Protein, ModelId } from '../types'
 
 const PROTEINS: Protein[] = [
@@ -12,11 +12,7 @@ const PROTEINS: Protein[] = [
   { id: 'cftr', name: 'CFTR NBD1', sequence: 'MKQFNLRSFNQMAKEELYRQGVRVLVTHSKFQLQDRFPFQELLD...', uniprotId: 'P13569', description: 'Cystic fibrosis transmembrane regulator', residueCount: 250 },
 ]
 
-const MODELS: { id: ModelId; name: string; badge: string; description: string }[] = [
-  { id: 'af2', name: 'AlphaFold 2', badge: 'AF2', description: 'Gold standard — JAX/Haiku, needs MSA' },
-  { id: 'esmfold', name: 'ESMFold', badge: 'ESM', description: 'Single-sequence — no MSA, seconds' },
-  { id: 'boltz2', name: 'Boltz-2', badge: 'B2', description: 'Protein + RNA + DNA + ligands' },
-]
+const ALL_MODELS: ModelId[] = ['af2', 'esmfold', 'boltz2']
 
 interface ProteinSelectorProps {
   onSubmit: (protein: Protein, models: ModelId[]) => void
@@ -25,107 +21,58 @@ interface ProteinSelectorProps {
 
 export default function ProteinSelector({ onSubmit, isRunning }: ProteinSelectorProps) {
   const [selectedProtein, setSelectedProtein] = useState<Protein>(PROTEINS[0])
-  const [selectedModels, setSelectedModels] = useState<Set<ModelId>>(new Set(['af2', 'esmfold', 'boltz2']))
-
-  const toggleModel = (id: ModelId) => {
-    setSelectedModels(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
-  }
-
-  const jobCount = selectedModels.size * 2 // each model × 2 silicons
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      {/* Section header */}
-      <div className="flex items-center gap-2 text-white/60 text-xs font-mono uppercase tracking-widest">
-        <Dna size={14} />
-        <span>Protein</span>
+    <div className="p-4 space-y-4">
+      {/* Protein grid */}
+      <div>
+        <div className="text-white/30 text-[9px] font-mono uppercase tracking-widest mb-2 flex items-center gap-1.5">
+          <Dna size={10} />
+          Target protein
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          {PROTEINS.map(p => (
+            <button
+              key={p.id}
+              onClick={() => setSelectedProtein(p)}
+              className={`text-left px-2 py-1.5 rounded text-[10px] font-mono transition-all ${
+                selectedProtein.id === p.id
+                  ? 'bg-[#00ffcc]/10 text-[#00ffcc] border border-[#00ffcc]/30'
+                  : 'bg-white/[0.02] text-white/40 border border-transparent hover:bg-white/[0.04]'
+              }`}
+            >
+              <div className="font-semibold">{p.name}</div>
+              <div className="text-white/20 text-[8px]">{p.residueCount} aa</div>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Protein selector */}
-      <div className="grid grid-cols-2 gap-1.5">
-        {PROTEINS.map(p => (
-          <button
-            key={p.id}
-            onClick={() => setSelectedProtein(p)}
-            className={`
-              text-left px-2.5 py-1.5 rounded text-xs transition-all
-              ${selectedProtein.id === p.id
-                ? 'bg-white/10 text-white border border-white/20'
-                : 'bg-white/[0.03] text-white/50 border border-transparent hover:bg-white/[0.06] hover:text-white/70'}
-            `}
-          >
-            <div className="font-medium">{p.name}</div>
-            <div className="text-[10px] text-white/30 mt-0.5">{p.residueCount} residues</div>
-          </button>
-        ))}
+      {/* Selected protein card */}
+      <div className="bg-[#00ffcc]/5 border border-[#00ffcc]/20 rounded-lg p-3">
+        <div className="text-[12px] font-mono font-bold text-[#00ffcc]">{selectedProtein.name}</div>
+        <div className="text-[10px] text-white/50 mt-0.5">{selectedProtein.description}</div>
+        <div className="text-[8px] font-mono text-white/20 mt-1">UniProt: {selectedProtein.uniprotId} · {selectedProtein.residueCount} aa</div>
       </div>
 
-      {/* Protein info card */}
-      <div className="bg-white/[0.03] rounded-lg p-3 border border-white/5">
-        <div className="text-sm font-medium text-white/80">{selectedProtein.name}</div>
-        <div className="text-[11px] text-white/40 mt-1">{selectedProtein.description}</div>
-        <div className="text-[10px] font-mono text-white/20 mt-1">UniProt: {selectedProtein.uniprotId} · {selectedProtein.residueCount} aa</div>
-      </div>
-
-      {/* Model selector */}
-      <div className="flex items-center gap-2 text-white/60 text-xs font-mono uppercase tracking-widest mt-2">
-        <FlaskConical size={14} />
-        <span>Models</span>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        {MODELS.map(m => (
-          <button
-            key={m.id}
-            onClick={() => toggleModel(m.id)}
-            className={`
-              flex items-center gap-2 px-3 py-2 rounded text-xs transition-all
-              ${selectedModels.has(m.id)
-                ? 'bg-white/10 text-white border border-white/20'
-                : 'bg-white/[0.03] text-white/40 border border-transparent hover:bg-white/[0.06]'}
-            `}
-          >
-            <div className={`
-              w-8 h-5 rounded text-[10px] font-bold flex items-center justify-center
-              ${selectedModels.has(m.id) ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-white/20'}
-            `}>
-              {m.badge}
-            </div>
-            <div className="flex-1 text-left">
-              <div className="font-medium">{m.name}</div>
-              <div className="text-[10px] text-white/30">{m.description}</div>
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* Submit button */}
+      {/* Submit button — matches F-22 SIMULATE */}
       <motion.button
-        onClick={() => onSubmit(selectedProtein, [...selectedModels])}
-        disabled={isRunning || selectedModels.size === 0}
-        className={`
-          mt-4 w-full py-3 rounded-lg font-bold text-sm tracking-wide
-          flex items-center justify-center gap-2
-          transition-all
-          ${isRunning
-            ? 'bg-white/5 text-white/30 cursor-wait'
-            : 'bg-gradient-to-r from-emerald-600 to-cyan-600 text-white hover:from-emerald-500 hover:to-cyan-500 shadow-lg shadow-emerald-500/20'}
-        `}
-        whileHover={isRunning ? {} : { scale: 1.02 }}
-        whileTap={isRunning ? {} : { scale: 0.98 }}
+        onClick={() => onSubmit(selectedProtein, ALL_MODELS)}
+        disabled={isRunning}
+        className={`w-full py-2.5 rounded-lg font-mono text-[11px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all border ${
+          isRunning
+            ? 'bg-white/[0.03] text-white/30 border-white/10 cursor-wait'
+            : 'bg-[#00ffcc]/10 text-[#00ffcc] border-[#00ffcc]/30 hover:bg-[#00ffcc]/20'
+        }`}
+        whileHover={isRunning ? {} : { scale: 1.01 }}
+        whileTap={isRunning ? {} : { scale: 0.99 }}
       >
-        <Zap size={16} />
-        {isRunning
-          ? 'Running...'
-          : `Submit All · ${jobCount} jobs → TPU + GPU`}
+        <Zap size={14} />
+        {isRunning ? 'Running...' : 'Submit All'}
       </motion.button>
 
-      <div className="text-[10px] text-white/20 text-center font-mono">
-        sbatch predict.sh --model=all --target=both --protein={selectedProtein.id}
+      <div className="text-[8px] text-white/15 font-mono text-center">
+        AF2 + ESMFold + Boltz-2 → TPU + GPU · 6 jobs
       </div>
     </div>
   )

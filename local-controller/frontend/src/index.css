@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Hide React Flow node handles (the tiny circles) */
+.react-flow__handle { display: none !important; }
+/* Smaller, consistent node styling */
+.react-flow__node { font-family: 'Google Sans', 'Inter', ui-monospace, monospace !important; }
+.react-flow__edge-path { stroke-width: 1.5 !important; }
+.react-flow__background { opacity: 0.3; }
+
 html, body, #root {
   height: 100%;
   overflow: hidden;

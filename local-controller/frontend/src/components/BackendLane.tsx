@@ -1,143 +1,103 @@
-import React, { useEffect, useState } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
-import { Cpu, Zap, Download, Brain, CheckCircle, XCircle, Clock, DollarSign } from 'lucide-react'
-import type { LaneStatus, LaneState } from '../types'
+import React from 'react'
+import { Loader2 } from 'lucide-react'
+import type { LaneStatus } from '../types'
 import type { AcceleratorBackend } from '../backends'
-
-const STATE_CONFIG: Record<LaneState, { icon: any; label: string; color: string }> = {
-  idle:       { icon: Clock,       label: 'Idle',            color: 'text-zinc-500' },
-  queued:     { icon: Clock,       label: 'Queued',          color: 'text-zinc-400' },
-  allocating: { icon: Zap,         label: 'Spot allocating', color: 'text-yellow-400' },
-  pulling:    { icon: Download,    label: 'Pulling image',   color: 'text-blue-400' },
-  loading:    { icon: Brain,       label: 'Loading model',   color: 'text-purple-400' },
-  inferring:  { icon: Cpu,         label: 'Inferring',       color: 'text-cyan-400' },
-  done:       { icon: CheckCircle, label: 'Done',            color: 'text-emerald-400' },
-  failed:     { icon: XCircle,     label: 'Failed',          color: 'text-red-400' },
-}
-
-const PROGRESS_ORDER: LaneState[] = ['idle', 'queued', 'allocating', 'pulling', 'loading', 'inferring', 'done']
-
-function progressPercent(state: LaneState): number {
-  const idx = PROGRESS_ORDER.indexOf(state)
-  if (idx < 0) return 0
-  return Math.round((idx / (PROGRESS_ORDER.length - 1)) * 100)
-}
 
 interface BackendLaneProps {
   backend: AcceleratorBackend
   status: LaneStatus
   isSelected: boolean
   onSelect: () => void
+  cheapestCost: number | null
 }
 
-export default function BackendLane({ backend, status, isSelected, onSelect }: BackendLaneProps) {
-  const cfg = STATE_CONFIG[status.state]
-  const Icon = cfg.icon
-  const pct = progressPercent(status.state)
+export default function BackendLane({ backend, status, isSelected, onSelect, cheapestCost }: BackendLaneProps) {
   const isTpu = backend.siliconId === 'tpu'
+  const costPerSolve = status.costAccumulated
+  const ratio = cheapestCost && costPerSolve > 0 ? costPerSolve / cheapestCost : null
 
-  const [elapsedDisplay, setElapsedDisplay] = useState('0.0s')
+  const dotClass = status.state === 'done'
+    ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse'
+    : status.state === 'inferring' || status.state === 'loading' || status.state === 'allocating'
+    ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]'
+    : status.state === 'failed'
+    ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]'
+    : 'bg-white/20'
 
-  useEffect(() => {
-    if (!status.startedAt || status.state === 'done' || status.state === 'failed' || status.state === 'idle') {
-      if (status.completedAt && status.startedAt) {
-        setElapsedDisplay(`${((status.completedAt - status.startedAt) / 1000).toFixed(1)}s`)
-      }
-      return
-    }
-    const interval = setInterval(() => {
-      setElapsedDisplay(`${((Date.now() - status.startedAt!) / 1000).toFixed(1)}s`)
-    }, 100)
-    return () => clearInterval(interval)
-  }, [status.startedAt, status.state, status.completedAt])
+  const siliconStr = status.result?.device_kind ?? (isTpu ? 'TPU v6 lite' : 'NVIDIA A100-SXM4-40GB')
 
   return (
-    <motion.div
+    <div
       onClick={onSelect}
-      className={`
-        relative overflow-hidden rounded-lg border cursor-pointer
-        transition-all duration-200
-        ${isSelected ? 'ring-2 ring-white/30 bg-white/[0.06]' : 'bg-white/[0.03] hover:bg-white/[0.05]'}
-        ${backend.accent}
-      `}
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.3 }}
+      className={`border ${backend.accent} bg-white/[0.02] rounded-lg p-3 cursor-pointer transition-all hover:bg-white/[0.04] ${isSelected ? 'ring-1 ring-white/20' : ''}`}
+      title={backend.blurb}
     >
-      {/* Progress bar background */}
-      <div className="absolute inset-0 pointer-events-none">
-        <motion.div
-          className={`h-full ${isTpu ? 'bg-emerald-500/10' : 'bg-amber-500/10'}`}
-          initial={{ width: '0%' }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
-        />
-      </div>
-
-      <div className="relative p-3 flex items-center gap-3">
-        {/* Silicon badge */}
-        <div className={`
-          flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider
-          ${isTpu ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}
-        `}>
-          {backend.siliconName}
-        </div>
-
-        {/* Model name */}
-        <div className="flex-shrink-0 text-sm font-medium text-white/80 w-20">
-          {backend.modelName}
-        </div>
-
-        {/* State indicator */}
-        <div className={`flex items-center gap-1.5 flex-1 ${cfg.color}`}>
-          <Icon size={14} className={status.state === 'inferring' || status.state === 'allocating' ? 'animate-pulse' : ''} />
-          <span className="text-xs font-mono">{cfg.label}</span>
-        </div>
-
-        {/* Timer */}
-        <div className="text-xs font-mono text-white/50 w-14 text-right">
-          {status.state !== 'idle' ? elapsedDisplay : '—'}
-        </div>
-
-        {/* Cost */}
-        <div className="flex items-center gap-0.5 text-xs font-mono w-20 text-right">
-          <DollarSign size={10} className="text-white/30" />
-          <span className={status.state === 'done' ? (isTpu ? 'text-emerald-300' : 'text-amber-300') : 'text-white/40'}>
-            {status.costAccumulated > 0 ? status.costAccumulated.toFixed(4) : '0.0000'}
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${dotClass}`} />
+          <span className="font-mono text-[11px] uppercase tracking-wider text-white/80 truncate">
+            {backend.shortLabel}
           </span>
-        </div>
-
-        {/* Talk track badge */}
-        <AnimatePresence>
           {status.state === 'done' && (
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold text-white/60"
-              title={backend.talkTrackLabel}
-            >
-              {backend.talkTrackSlide}
-            </motion.div>
+            <span className="text-[8.5px] font-mono italic text-white/35 truncate">{siliconStr}</span>
           )}
-        </AnimatePresence>
+        </div>
+        {(status.state === 'allocating' || status.state === 'pulling' || status.state === 'loading' || status.state === 'inferring') && (
+          <Loader2 size={12} className="text-[#00ffcc] animate-spin shrink-0" />
+        )}
+        {status.state === 'failed' && (
+          <span className="text-red-400 text-[9px] font-mono uppercase shrink-0">err</span>
+        )}
       </div>
 
-      {/* Expanded detail on selection */}
-      <AnimatePresence>
-        {isSelected && status.result && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="relative border-t border-white/5 px-3 py-2 text-[11px] font-mono text-white/40 space-y-1"
-          >
-            <div>pLDDT: <span className="text-white/70">{status.result.plddt_mean.toFixed(1)}</span></div>
-            <div>Device: <span className="text-white/70">{status.result.device_kind}</span></div>
-            <div>Residues: <span className="text-white/70">{status.result.seq_len}</span></div>
-            <div className="text-white/20">{backend.blurb}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+      {status.state === 'idle' && (
+        <div className="text-white/20 font-mono text-[10px]">— click Submit All —</div>
+      )}
+
+      {(status.state === 'queued' || status.state === 'allocating') && (
+        <div className="text-white/40 font-mono text-[10px]">
+          {status.state === 'queued' ? 'queued...' : 'spot allocating...'}
+        </div>
+      )}
+
+      {(status.state === 'pulling' || status.state === 'loading') && (
+        <div className="text-white/40 font-mono text-[10px]">
+          {status.state === 'pulling' ? 'pulling image...' : 'loading model...'}
+        </div>
+      )}
+
+      {status.state === 'inferring' && (
+        <div className="text-[#00ffcc]/60 font-mono text-[10px]">inferring...</div>
+      )}
+
+      {status.state === 'failed' && (
+        <div className="text-red-400/80 font-mono text-[10px]">{status.error?.slice(0, 40) || 'failed'}</div>
+      )}
+
+      {status.state === 'done' && (() => {
+        const itemsPerDollar = costPerSolve > 0 ? 1 / costPerSolve : 0
+        const itemsStr = itemsPerDollar >= 1e6 ? `${(itemsPerDollar / 1e6).toFixed(1)}M`
+          : itemsPerDollar >= 1e3 ? `${(itemsPerDollar / 1e3).toFixed(1)}K`
+          : `${Math.round(itemsPerDollar)}`
+        return (
+          <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
+            <div>
+              <div className="text-white/30 uppercase tracking-wider">$ / predict</div>
+              <div className="text-[#00ffcc]">${costPerSolve.toFixed(6)}</div>
+            </div>
+            <div>
+              <div className="text-white/30 uppercase tracking-wider">predicts / $</div>
+              <div className="text-[#00ffcc]">{itemsStr}</div>
+            </div>
+            <div>
+              <div className="text-white/30 uppercase tracking-wider">vs best</div>
+              <div className={ratio !== null && ratio <= 1.01 ? 'text-emerald-400' : 'text-white/60'}>
+                {ratio !== null ? (ratio <= 1.01 ? '✓' : `${ratio.toFixed(1)}×`) : '—'}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+    </div>
   )
 }
