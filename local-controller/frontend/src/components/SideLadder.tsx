@@ -20,7 +20,7 @@ export default function SideLadder({ lanes, onSelect }: SideLadderProps) {
         const ratio = cheapest && cost > 0 ? cost / cheapest : null
 
         return (
-          <div key={b.id} className={`side-ladder-item ${stateClass}`} onClick={() => onSelect(b.id)}>
+          <div key={b.id} className={`side-ladder-item ${stateClass}`} onClick={() => onSelect(b.id)} title={`Slide ${b.talkTrackSlide}: ${b.talkTrackLabel}`}>
             <span style={{ fontWeight: 600, letterSpacing: '0.05em' }}>{b.shortLabel}</span>
             {lane.state === 'idle' && <span className="side-ladder-ms">— submit all —</span>}
             {lane.state !== 'idle' && lane.state !== 'done' && (
