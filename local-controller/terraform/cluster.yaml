@@ -88,6 +88,11 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
+      enable_shielded_vm: true
+      shielded_instance_config:
+        enable_secure_boot: true
+        enable_vtpm: true
+        enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 1 }
 
   # TPU v6e Spot — us-east5-b (7,066 capacity)
@@ -104,6 +109,11 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
+      enable_shielded_vm: true
+      shielded_instance_config:
+        enable_secure_boot: true
+        enable_vtpm: true
+        enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 2 }
 
   # TPU v6e Spot — us-east5-a (4,356 capacity)
@@ -120,6 +130,11 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
+      enable_shielded_vm: true
+      shielded_instance_config:
+        enable_secure_boot: true
+        enable_vtpm: true
+        enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 3 }
 
   # TPU v6e Spot — us-central1-b (3,800 capacity)
@@ -136,6 +151,11 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
+      enable_shielded_vm: true
+      shielded_instance_config:
+        enable_secure_boot: true
+        enable_vtpm: true
+        enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 4 }
 
   # TPU v6e Spot — us-east1-d (2,690 capacity)
@@ -152,6 +172,11 @@ deployment_groups:
       node_count_static: 0
       node_count_dynamic_max: 2
       enable_placement: false
+      enable_shielded_vm: true
+      shielded_instance_config:
+        enable_secure_boot: true
+        enable_vtpm: true
+        enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 5 }
 
   # ===================================================================
@@ -238,6 +263,11 @@ deployment_groups:
       disk_size_gb: 100
       enable_login_public_ips: false
       machine_type: n2-standard-4
+      enable_shielded_vm: true
+      shielded_instance_config:
+        enable_secure_boot: true
+        enable_vtpm: true
+        enable_integrity_monitoring: true
 
   - id: slurm_controller
     source: community/modules/scheduler/schedmd-slurm-gcp-v6-controller
@@ -253,3 +283,8 @@ deployment_groups:
       disk_size_gb: 200
       machine_type: n2-standard-8
       enable_external_prolog_epilog: true
+      enable_shielded_vm: true
+      shielded_instance_config:
+        enable_secure_boot: true
+        enable_vtpm: true
+        enable_integrity_monitoring: true
