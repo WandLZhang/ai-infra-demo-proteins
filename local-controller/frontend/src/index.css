@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+.hud-scroll {
+  max-height: calc(100vh - 130px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 204, 0.2) transparent;
+}
+.hud-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.hud-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hud-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 204, 0.2);
+  border-radius: 2px;
+}
+
+.sensor-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 204, 0.2) transparent;
+}
+.sensor-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.sensor-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sensor-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 204, 0.2);
+  border-radius: 2px;
+}

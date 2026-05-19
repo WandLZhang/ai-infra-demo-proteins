@@ -1,0 +1,104 @@
+# AF2-TPU backend on TPU v6e Trillium — Spot allocation.
+#
+# Uses Spot (not Flex) to match the slurm-multi-region-gpu pattern:
+# cheaper, preemptible, jobs auto-resume via Slurm --requeue + checkpoint.
+# If preemption happens during the demo, that's a feature — we show
+# the recovery mechanism working live.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: af2-tpu
+  labels:
+    app: af2-tpu
+    model: alphafold2
+    silicon: tpu-v6e
+    consumption: spot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: af2-tpu
+  template:
+    metadata:
+      labels:
+        app: af2-tpu
+        model: alphafold2
+        silicon: tpu-v6e
+        consumption: spot
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+        cloud.google.com/gke-tpu-accelerator: tpu-v6e-slice
+        cloud.google.com/gke-tpu-topology: 2x2
+      tolerations:
+        - key: "google.com/tpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "cloud.google.com/gke-spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      containers:
+        - name: af2-tpu
+          image: us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/af2-tpu:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: JAX_PLATFORMS
+              value: "tpu,cpu"
+            - name: SHARED_BUCKET
+              value: "wz-nih-demo-shared"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: "wz-nih-demo-burst"
+          resources:
+            limits:
+              google.com/tpu: 4
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: af2-tpu
+spec:
+  selector:
+    app: af2-tpu
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: af2-tpu-ingress
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    cloud.google.com/backend-config: '{"default": "af2-tpu-backend-config"}'
+spec:
+  defaultBackend:
+    service:
+      name: af2-tpu
+      port:
+        number: 8000
+---
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: af2-tpu-backend-config
+spec:
+  timeoutSec: 600
+  connectionDraining:
+    drainingTimeoutSec: 60
