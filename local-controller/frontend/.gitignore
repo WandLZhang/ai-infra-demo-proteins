@@ -127,3 +127,4 @@ desktop.ini
 tmp/
 temp/
 *.tar.gz
+.env*
