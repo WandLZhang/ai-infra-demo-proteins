@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react'
-import { ReactFlow, Background, Controls, type Node, type Edge, Position, MarkerType } from '@xyflow/react'
+import { ReactFlow, Background, type Node, type Edge, Position, MarkerType } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { motion, AnimatePresence } from 'motion/react'
 import { Dna, Zap, DollarSign, Cpu, Server, Activity } from 'lucide-react'
@@ -33,14 +33,15 @@ function buildInfraNodes(lanes: Record<BackendId, LaneStatus>): Node[] {
 
   const nodeStyle = (id: BackendId) => ({
     background: '#0a0a0f',
-    border: `2px solid ${stateColor(id)}`,
-    borderRadius: 8,
-    padding: 12,
+    border: `1.5px solid ${stateColor(id)}`,
+    borderRadius: 6,
+    padding: '6px 10px',
     color: '#e4e4e7',
-    fontSize: 11,
-    fontFamily: 'monospace',
-    minWidth: 140,
-    boxShadow: `0 0 12px ${stateColor(id)}33`,
+    fontSize: 10,
+    fontFamily: "'Google Sans', 'Inter', monospace",
+    width: 120,
+    textAlign: 'center' as const,
+    boxShadow: `0 0 8px ${stateColor(id)}22`,
   })
 
   return [
@@ -48,14 +49,14 @@ function buildInfraNodes(lanes: Record<BackendId, LaneStatus>): Node[] {
     {
       id: 'controller', type: 'default', position: { x: 50, y: 220 },
       data: { label: '🖥 slurmctld\nwz-nih-demo-controller' },
-      style: { background: '#0a0a0f', border: '2px solid #06b6d4', borderRadius: 8, padding: 12, color: '#06b6d4', fontSize: 11, fontFamily: 'monospace', minWidth: 160, boxShadow: '0 0 20px #06b6d433' },
+      style: { background: '#0a0a0f', border: '1.5px solid #06b6d4', borderRadius: 6, padding: '6px 10px', color: '#06b6d4', fontSize: 10, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const, boxShadow: '0 0 12px #06b6d422' },
       sourcePosition: Position.Right,
     },
     // TPU column
     {
       id: 'tpu-header', type: 'default', position: { x: 380, y: 20 },
       data: { label: '⚡ TPU v6e Trillium\nSpot · 5 CONUS zones' },
-      style: { background: '#064e3b22', border: '1px solid #10b98144', borderRadius: 8, padding: 10, color: '#6ee7b7', fontSize: 10, fontFamily: 'monospace', minWidth: 160 },
+      style: { background: '#064e3b15', border: '1px solid #10b98133', borderRadius: 6, padding: '4px 8px', color: '#6ee7b7', fontSize: 9, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const },
     },
     {
       id: 'af2-tpu', type: 'default', position: { x: 360, y: 100 },
@@ -76,7 +77,7 @@ function buildInfraNodes(lanes: Record<BackendId, LaneStatus>): Node[] {
     {
       id: 'gpu-header', type: 'default', position: { x: 620, y: 20 },
       data: { label: '🔥 GPU A100\nSpot · 2 CONUS zones' },
-      style: { background: '#451a0322', border: '1px solid #f5920044', borderRadius: 8, padding: 10, color: '#fbbf24', fontSize: 10, fontFamily: 'monospace', minWidth: 160 },
+      style: { background: '#451a0315', border: '1px solid #f5920033', borderRadius: 6, padding: '4px 8px', color: '#fbbf24', fontSize: 9, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const },
     },
     {
       id: 'af2-gpu', type: 'default', position: { x: 600, y: 100 },
@@ -97,7 +98,7 @@ function buildInfraNodes(lanes: Record<BackendId, LaneStatus>): Node[] {
     {
       id: 'results', type: 'default', position: { x: 880, y: 220 },
       data: { label: '📊 Results\nPDB + pLDDT + $/prediction' },
-      style: { background: '#0a0a0f', border: '1px solid #06b6d444', borderRadius: 8, padding: 12, color: '#a1a1aa', fontSize: 10, fontFamily: 'monospace', minWidth: 160 },
+      style: { background: '#0a0a0f', border: '1px solid #06b6d433', borderRadius: 6, padding: '6px 10px', color: '#a1a1aa', fontSize: 9, fontFamily: "'Google Sans', monospace", width: 140, textAlign: 'center' as const },
       targetPosition: Position.Left,
     },
   ]
@@ -268,15 +269,24 @@ export default function App() {
         className="absolute top-16 right-4 z-20 w-80 rounded-xl bg-black/50 backdrop-blur-md border border-white/[0.06] shadow-2xl overflow-hidden max-h-[calc(100vh-5rem)]"
         initial={{ x: 340 }} animate={{ x: 0 }} transition={{ duration: 0.4 }}
       >
-        <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2">
-          <Activity size={12} className="text-[#06b6d4]" />
-          <span className="text-[10px] font-mono uppercase tracking-widest text-white/40">Accelerator $/calc</span>
+        <div className="p-4 pb-2">
+          <h2 className="text-white font-sans text-sm font-semibold uppercase tracking-widest mb-1 flex items-center gap-2">
+            <Cpu size={16} className="text-[#00ffcc]" />
+            Accelerator $/calc
+          </h2>
+          <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider">
+            Same protein. Live across silicon.
+          </p>
         </div>
-        <div className="p-2 space-y-1.5 overflow-y-auto max-h-[400px]">
-          {BACKENDS.map(b => (
-            <BackendLane key={b.id} backend={b} status={lanes[b.id]}
-              isSelected={selectedLane === b.id} onSelect={() => setSelectedLane(selectedLane === b.id ? null : b.id)} />
-          ))}
+        <div className="px-3 pb-3 space-y-1.5 overflow-y-auto max-h-[400px]">
+          {(() => {
+            const doneLanes = BACKENDS.map(b => ({ b, lane: lanes[b.id] })).filter(x => x.lane.state === 'done' && x.lane.costAccumulated > 0)
+            const cheapest = doneLanes.length > 0 ? Math.min(...doneLanes.map(x => x.lane.costAccumulated)) : null
+            return BACKENDS.map(b => (
+              <BackendLane key={b.id} backend={b} status={lanes[b.id]} cheapestCost={cheapest}
+                isSelected={selectedLane === b.id} onSelect={() => setSelectedLane(selectedLane === b.id ? null : b.id)} />
+            ))
+          })()}
         </div>
         <AnimatePresence>{showScorecard && <Scorecard lanes={lanes} />}</AnimatePresence>
       </motion.div>
