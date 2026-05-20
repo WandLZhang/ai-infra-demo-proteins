@@ -10,21 +10,22 @@ interface LocationPaperProps {
 
 export default function LocationPaper({ protein, activeZone, totalCost, savings }: LocationPaperProps) {
   return (
-    <div className="location-paper">
+    <div className="location-paper" key={protein.id}>
       <div className="location-paper-region">
-        {activeZone || 'NIH BIOWULF · PROTEIN STRUCTURE PREDICTION'}
+        {activeZone || 'Biowulf Controller — Standing By'}
       </div>
-      <div className="location-paper-name" key={protein.id}>
+      <div className="location-paper-name">
         {protein.name}
       </div>
       <div className="location-paper-coords">
-        {protein.description} · {protein.residueCount} aa · UniProt: {protein.uniprotId}
-        {totalCost !== undefined && (
-          <span style={{ marginLeft: 16, color: '#09d3ac' }}>
-            TPU total: ${totalCost.toFixed(4)} {savings && `(${savings} cheaper)`}
-          </span>
-        )}
+        ID: {protein.uniprotId} · {protein.residueCount} AA · {savings ? `SAVINGS: ${savings}` : 'BURSTING READY'}
       </div>
+      {totalCost !== undefined && (
+        <div className="location-paper-cost">
+          <span style={{ fontSize: 10, color: '#09d3ac', fontWeight: 700 }}>SESSION COST: </span>
+          <span style={{ fontSize: 14, color: '#fff', fontFamily: "'Google Sans', sans-serif" }}>${totalCost.toFixed(4)}</span>
+        </div>
+      )}
     </div>
   )
 }
