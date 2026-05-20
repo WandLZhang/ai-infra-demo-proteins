@@ -18,6 +18,9 @@ export default function LocationPaper({ protein, activeZone, totalCost, savings 
         {protein.name}
       </div>
       <div className="location-paper-coords">
+        {protein.description}
+      </div>
+      <div className="location-paper-coords" style={{ animationDelay: '0.85s', fontSize: '1.2vw' }}>
         {protein.uniprotId} · {protein.residueCount} AA {savings && <span style={{ color: '#09d3ac' }}>· {savings}</span>}
       </div>
       {totalCost !== undefined && (
