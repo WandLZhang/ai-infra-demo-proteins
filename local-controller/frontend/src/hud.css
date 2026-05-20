@@ -120,7 +120,9 @@
   animation-delay: 0.65s;
   animation-fill-mode: both;
   color: #708090;
-  font-size: 1.2vw;
-  font-family: 'Courier New', monospace;
+  font-size: 1.5vw;
+  font-family: 'Google Sans', 'Roboto', sans-serif;
+  font-weight: 300;
+  letter-spacing: 0.03em;
   margin-top: 8px;
 }
