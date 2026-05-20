@@ -33,10 +33,18 @@ export interface ZoneInfo {
 }
 
 export const ZONE_LOCATIONS: ZoneInfo[] = [
-  { id: 'us-west1-c', lat: 45.5945, lng: -122.1562, label: 'us-west1', backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },
-  { id: 'us-east5', lat: 34.0071, lng: -84.1487, label: 'us-east5', backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
-  { id: 'us-central1', lat: 41.2619, lng: -95.8608, label: 'us-central1', backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
-  { id: 'us-east1', lat: 33.1960, lng: -80.0131, label: 'us-east1', backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },
+  // All CONUS GCP regions — exact coordinates from hud.jamalmahboob.com + Google data
+  { id: 'us-west1',    lat: 45.6095, lng: -121.1914, label: 'us-west1',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },          // The Dalles, Oregon
+  { id: 'us-west2',    lat: 34.0207, lng: -118.5518, label: 'us-west2',    backends: [] },                                                 // Los Angeles, California
+  { id: 'us-west3',    lat: 40.7608, lng: -111.8910, label: 'us-west3',    backends: [] },                                                 // Salt Lake City, Utah
+  { id: 'us-west4',    lat: 36.1699, lng: -115.1398, label: 'us-west4',    backends: [] },                                                 // Las Vegas, Nevada
+  { id: 'us-west8',    lat: 33.4484, lng: -112.0740, label: 'us-west8',    backends: [] },                                                 // Phoenix, Arizona
+  { id: 'us-central1', lat: 41.2328, lng:  -95.8817, label: 'us-central1', backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] }, // Council Bluffs, Iowa
+  { id: 'us-south1',   lat: 32.8203, lng:  -97.0430, label: 'us-south1',   backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },          // Dallas, Texas
+  { id: 'us-east1',    lat: 33.1974, lng:  -80.0100, label: 'us-east1',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },          // Moncks Corner, South Carolina
+  { id: 'us-east4',    lat: 39.0300, lng:  -77.5121, label: 'us-east4',    backends: ['af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },           // Ashburn, Northern Virginia
+  { id: 'us-east5',    lat: 39.9829, lng:  -83.0734, label: 'us-east5',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] }, // Columbus, Ohio
+  { id: 'us-east7',    lat: 35.2271, lng:  -80.8431, label: 'us-east7',    backends: [] },                                                 // Charlotte, North Carolina
 ]
 
 interface InfraMapProps {
