@@ -1,4 +1,4 @@
-export const HUD_MAP_STYLES: google.maps.MapTypeStyle[] = [
+export const HUD_MAP_STYLES: any[] = [
   {
     "elementType": "geometry",
     "stylers": [
