@@ -6,23 +6,7 @@ import { BACKENDS } from '../backends'
 
 const MAPS_API_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || ''
 
-const MAP_STYLES = [
-  { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
-  { elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
-  { featureType: 'administrative' as const, elementType: 'geometry.stroke', stylers: [{ color: '#4b6878' }] },
-  { featureType: 'administrative.country' as const, elementType: 'labels', stylers: [{ visibility: 'on' }] },
-  { featureType: 'administrative.province' as const, elementType: 'geometry.stroke', stylers: [{ color: '#4b6878' }] },
-  { featureType: 'landscape' as const, elementType: 'geometry', stylers: [{ color: '#171717' }] },
-  { featureType: 'road' as const, elementType: 'geometry', stylers: [{ color: '#2c6675' }] },
-  { featureType: 'road' as const, elementType: 'labels.text.fill', stylers: [{ color: '#98a5be' }] },
-  { featureType: 'road' as const, elementType: 'labels.text.stroke', stylers: [{ color: '#1d2c4d' }] },
-  { featureType: 'water' as const, elementType: 'geometry.fill', stylers: [{ color: '#283d6a' }] },
-  { featureType: 'water' as const, elementType: 'geometry', stylers: [{ color: '#3a4762' }] },
-  { featureType: 'poi' as const, stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit' as const, stylers: [{ visibility: 'off' }] },
-]
+import { HUD_MAP_STYLES } from '../mapStyles'
 
 export interface ZoneInfo {
   id: string
@@ -80,7 +64,7 @@ export default function InfraMap({ lanes, onZoneClick }: InfraMapProps) {
       center={{ lat: 39.5, lng: -98.35 }}
       zoom={5}
       options={{
-        styles: MAP_STYLES as google.maps.MapTypeStyle[],
+        styles: HUD_MAP_STYLES as google.maps.MapTypeStyle[],
         disableDefaultUI: true,
         zoomControl: false,
         mapTypeControl: false,
