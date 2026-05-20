@@ -16,6 +16,10 @@ export interface ZoneInfo {
   backends: BackendId[]
 }
 
+// NIH Biowulf homebase — Building 12, Bethesda, MD
+// NIH Building 12, 12 South Dr, Bethesda MD 20892 (CIT / Biowulf HPC)
+export const BIOWULF_HOME = { lat: 39.0003, lng: -77.1003 }
+
 export const ZONE_LOCATIONS: ZoneInfo[] = [
   // All CONUS GCP regions — exact coordinates from hud.jamalmahboob.com + Google data
   { id: 'us-west1',    lat: 45.6095, lng: -121.1914, label: 'us-west1',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },          // The Dalles, Oregon
@@ -73,6 +77,14 @@ export default function InfraMap({ lanes, onZoneClick }: InfraMapProps) {
         backgroundColor: '#171717',
       }}
     >
+      {/* Homebase: NIH Building 12, Bethesda MD */}
+      <ZoneMarker
+        key="biowulf-home"
+        position={BIOWULF_HOME}
+        label="BIOWULF"
+        state="done"
+        onClick={() => {}}
+      />
       {ZONE_LOCATIONS.map(zone => (
         <ZoneMarker
           key={zone.id}
