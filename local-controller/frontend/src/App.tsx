@@ -100,57 +100,67 @@ export default function App() {
       {/* Fullscreen Google Maps */}
       <InfraMap lanes={lanes} onZoneClick={setSelectedZone} />
 
-      {/* Top-left: Title + protein selector */}
-      <div style={{ position: 'fixed', top: 16, left: 16, zIndex: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <Dna size={18} color="#09d3ac" />
-          <span style={{ fontFamily: "'Google Sans', sans-serif", fontSize: 14, fontWeight: 700, color: '#09d3ac', letterSpacing: '0.15em', textTransform: 'uppercase' as const }}>
-            Protein Structure Prediction
-          </span>
-          <span style={{ fontFamily: 'Courier New, monospace', fontSize: 10, color: '#708090', marginLeft: 8 }}>
-            NIH Biowulf · TPU vs GPU
-          </span>
-        </div>
+      {/* Top-left: Hamburger menu (matching Jamal's HUD) */}
+      <div style={{ position: 'fixed', top: 15, left: 15, zIndex: 25 }}>
+        <button
+          onClick={() => setProteinMenuOpen(!proteinMenuOpen)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer', color: 'white',
+            padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <span className="material-icons" style={{ fontSize: 28 }}>menu</span>
+        </button>
+      </div>
 
-        {/* Protein dropdown */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setProteinMenuOpen(!proteinMenuOpen)}
-            style={{
-              background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
-              border: '1px solid rgba(9,211,172,0.3)', borderRadius: 4,
-              color: '#09d3ac', fontFamily: 'Courier New, monospace', fontSize: 12,
-              padding: '6px 14px', cursor: 'pointer',
-            }}
-          >
-            {currentProtein.name} ▾
-          </button>
-          {proteinMenuOpen && (
-            <div style={{
-              position: 'absolute', top: '100%', left: 0, marginTop: 4,
-              background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4,
-              minWidth: 220, zIndex: 30,
-            }}>
-              {PROTEINS.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => { setCurrentProtein(p); setProteinMenuOpen(false) }}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left',
-                    padding: '8px 14px', border: 'none', cursor: 'pointer',
-                    background: currentProtein.id === p.id ? 'rgba(9,211,172,0.15)' : 'transparent',
-                    color: currentProtein.id === p.id ? '#09d3ac' : '#aaa',
-                    fontFamily: 'Courier New, monospace', fontSize: 11,
-                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                  }}
-                >
-                  <div style={{ fontWeight: 600 }}>{p.name}</div>
-                  <div style={{ fontSize: 9, color: '#708090', marginTop: 2 }}>{p.description}</div>
-                </button>
-              ))}
-            </div>
-          )}
+      {/* Floating menu panel — semi-transparent, animated */}
+      {proteinMenuOpen && (
+        <div
+          onClick={() => setProteinMenuOpen(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 28, background: 'rgba(0,0,0,0.3)' }}
+        />
+      )}
+      <div style={{
+        position: 'fixed', top: 60, left: 15, zIndex: 30, width: 300,
+        background: 'rgba(20,20,30,0.75)', backdropFilter: 'blur(16px) saturate(180%)',
+        border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+        transform: proteinMenuOpen ? 'scale(1) translateY(0)' : 'scale(0.95) translateY(-10px)',
+        opacity: proteinMenuOpen ? 1 : 0,
+        pointerEvents: proteinMenuOpen ? 'auto' as const : 'none' as const,
+        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        transformOrigin: 'top left',
+        overflow: 'hidden',
+      }}>
+        <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ fontFamily: "'Google Sans', 'Roboto', sans-serif", fontSize: 13, fontWeight: 600, color: '#09d3ac', letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>
+            Protein Structure Prediction
+          </div>
+          <div style={{ fontFamily: "'Google Sans', sans-serif", fontSize: 10, color: '#708090', marginTop: 3 }}>
+            NIH Biowulf · TPU vs GPU
+          </div>
+        </div>
+        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+          {PROTEINS.map(p => (
+            <button
+              key={p.id}
+              onClick={() => { setCurrentProtein(p); setProteinMenuOpen(false) }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '9px 20px', border: 'none', cursor: 'pointer',
+                background: currentProtein.id === p.id ? 'rgba(9,211,172,0.08)' : 'transparent',
+                color: currentProtein.id === p.id ? '#09d3ac' : '#999',
+                fontFamily: "'Google Sans', 'Roboto', sans-serif", fontSize: 12,
+                borderLeft: currentProtein.id === p.id ? '2px solid #09d3ac' : '2px solid transparent',
+                transition: 'all 0.12s ease',
+              }}
+              onMouseEnter={e => { if (currentProtein.id !== p.id) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)' }}
+              onMouseLeave={e => { if (currentProtein.id !== p.id) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+            >
+              <div style={{ fontWeight: 500 }}>{p.name}</div>
+              <div style={{ fontSize: 9, color: '#708090', marginTop: 2, fontFamily: "'Google Sans', sans-serif" }}>{p.residueCount} aa · {p.uniprotId}</div>
+            </button>
+          ))}
         </div>
       </div>
 
