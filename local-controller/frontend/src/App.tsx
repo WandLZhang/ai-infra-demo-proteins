@@ -164,25 +164,36 @@ export default function App() {
         </div>
       </div>
 
-      {/* Submit button — fixed bottom center */}
-      <div style={{ position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}>
-        <button
-          onClick={handleSubmit}
-          disabled={isRunning}
-          style={{
-            background: isRunning ? 'rgba(255,255,255,0.05)' : 'rgba(9,211,172,0.12)',
-            border: `1px solid ${isRunning ? 'rgba(255,255,255,0.1)' : 'rgba(9,211,172,0.4)'}`,
-            color: isRunning ? '#666' : '#09d3ac',
-            fontFamily: 'Courier New, monospace', fontSize: 13, fontWeight: 700,
-            padding: '10px 32px', borderRadius: 6, cursor: isRunning ? 'wait' : 'pointer',
-            letterSpacing: '0.12em', textTransform: 'uppercase' as const,
-            display: 'flex', alignItems: 'center', gap: 8,
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <Zap size={16} />
-          {isRunning ? 'Dispatching to Slurm...' : 'Submit All · 6 Jobs'}
-        </button>
+      {/* Terminal box — Jamal's region info card style */}
+      <div style={{
+        position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)', zIndex: 20,
+        background: '#000', border: '1px solid #d3d3d3', padding: 12,
+        fontFamily: "'Courier New', Courier, monospace", fontSize: '1.5vmin',
+        color: '#d3d3d3', maxWidth: '30vw', cursor: 'pointer',
+        whiteSpace: 'pre-wrap' as const,
+        transition: 'all 0.3s ease',
+      }}
+        onClick={isRunning ? undefined : handleSubmit}
+      >
+        {!isRunning ? (
+          <>
+            <div style={{ color: '#09d3ac', fontWeight: 700, marginBottom: 4 }}>BIOWULF · BUILDING 12</div>
+            <div style={{ color: '#708090' }}>$ sbatch predict.sh --model=all --target=both</div>
+            <div style={{ color: '#708090' }}>  --protein={currentProtein.id} --requeue</div>
+            <div style={{ marginTop: 6, color: '#09d3ac', fontSize: '1.2vmin' }}>▶ Click to submit 6 jobs → TPU + GPU</div>
+          </>
+        ) : (
+          <>
+            <div style={{ color: '#eab308', fontWeight: 700, marginBottom: 4 }}>BIOWULF · DISPATCHING</div>
+            <div>Submitted batch job 001 → tpu partition</div>
+            <div>Submitted batch job 002 → gpu partition</div>
+            <div>Submitted batch job 003 → tpu partition</div>
+            <div>Submitted batch job 004 → gpu partition</div>
+            <div>Submitted batch job 005 → tpu partition</div>
+            <div>Submitted batch job 006 → gpu partition</div>
+            <div style={{ color: '#eab308', marginTop: 4 }}>squeue: 6 jobs PENDING → allocating...</div>
+          </>
+        )}
       </div>
 
       {/* Side ladder — right */}
