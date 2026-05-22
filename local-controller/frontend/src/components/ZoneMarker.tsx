@@ -15,11 +15,15 @@ export default function ZoneMarker({ position, label, state, onClick }: ZoneMark
 
   return (
     <OverlayView position={position} mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}>
-      <div className={`marker-outer ${stateClass}`} onClick={onClick} style={{ cursor: 'pointer' }}>
-        <div className="rotatingBoxes1" />
-        <div className="rotatingBoxes2" />
-        <div className="rotatingBoxes3" />
-        <div className="marker-label">{label}</div>
+      <div className={`zone-marker-wrap ${stateClass}`} onClick={onClick}>
+        <div className="marker-spinner-box">
+          <div className="rotatingBoxes1" />
+          <div className="rotatingBoxes2" />
+          <div className="rotatingBoxes3" />
+        </div>
+        <div className="marker-text-box">
+          <b>{label}</b>
+        </div>
       </div>
     </OverlayView>
   )

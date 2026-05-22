@@ -1,5 +1,4 @@
-// Protein demo types — replaces aero-sim's wind/face/force types.
-// Keeps the same TpuMetrics shape so TpuMetricsModal works unchanged.
+// Protein demo types.
 
 export interface Protein {
   id: string

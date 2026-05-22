@@ -7,30 +7,59 @@ interface SideLadderProps {
   onSelect: (id: BackendId) => void
 }
 
+function stateLabel(state: string): string {
+  switch (state) {
+    case 'idle': return 'ready'
+    case 'queued': return 'queued'
+    case 'allocating': return 'allocating spot'
+    case 'pulling': return 'pulling container'
+    case 'loading': return 'loading model'
+    case 'inferring': return 'inferring...'
+    case 'done': return 'complete'
+    case 'failed': return 'failed'
+    default: return state
+  }
+}
+
 export default function SideLadder({ lanes, onSelect }: SideLadderProps) {
   const doneLanes = BACKENDS.map(b => ({ b, lane: lanes[b.id] })).filter(x => x.lane.state === 'done' && x.lane.costAccumulated > 0)
   const cheapest = doneLanes.length > 0 ? Math.min(...doneLanes.map(x => x.lane.costAccumulated)) : null
 
   return (
-    <div className="side-ladder">
+    <div className="sideLadderWrapper">
       {BACKENDS.map(b => {
         const lane = lanes[b.id]
-        const stateClass = lane.state === 'done' ? 'done' : (lane.state !== 'idle' ? 'active' : '')
         const cost = lane.costAccumulated
         const ratio = cheapest && cost > 0 ? cost / cheapest : null
 
+        let borderColor = 'rgba(255, 255, 255, 0.2)'
+        if (lane.state !== 'idle' && lane.state !== 'done' && lane.state !== 'failed') {
+          borderColor = 'rgba(244, 180, 0, 0.7)'
+        }
+        if (lane.state === 'done') {
+          borderColor = 'rgba(15, 157, 88, 0.7)'
+        }
+        if (lane.state === 'failed') {
+          borderColor = 'rgba(219, 68, 55, 0.7)'
+        }
+
+        let subtitle = stateLabel(lane.state)
+        if (lane.state === 'done') {
+          subtitle = `$${cost.toFixed(4)} / predict`
+          if (ratio !== null && ratio <= 1.01) subtitle += ' · best'
+          else if (ratio !== null) subtitle += ` · ${ratio.toFixed(1)}×`
+        }
+
         return (
-          <div key={b.id} className={`side-ladder-item ${stateClass}`} onClick={() => onSelect(b.id)} title={`Slide ${b.talkTrackSlide}: ${b.talkTrackLabel}`}>
-            <span style={{ fontWeight: 600, letterSpacing: '0.05em' }}>{b.shortLabel}</span>
-            {lane.state === 'idle' && <span className="side-ladder-ms">— submit all —</span>}
-            {lane.state !== 'idle' && lane.state !== 'done' && (
-              <span className="side-ladder-ms">{lane.state}...</span>
-            )}
-            {lane.state === 'done' && (
-              <span className="side-ladder-ms">
-                ${cost.toFixed(4)} · {ratio !== null && ratio <= 1.01 ? '✓ best' : `${ratio?.toFixed(1)}×`}
-              </span>
-            )}
+          <div
+            key={b.id}
+            className="sideLadderItem"
+            style={{ borderLeftColor: borderColor }}
+            onClick={() => onSelect(b.id)}
+            title={`Slide ${b.talkTrackSlide}: ${b.talkTrackLabel}`}
+          >
+            <span className="sideLadderName">{b.shortLabel}</span>
+            <span className="sideLadderSub">{subtitle}</span>
           </div>
         )
       })}
