@@ -1,3 +1,11 @@
+/* Baron Neue — ported from hud.jamalmahboob.com */
+@font-face {
+  font-family: 'BaronNeue-Regular';
+  src: url('./fonts/BaronNeue-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+}
+
 /* HUD-style animations — ported from hud.jamalmahboob.com */
 
 @keyframes rotatingBoxesAnim1 { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -14,60 +22,95 @@
   50% { box-shadow: 0 0 20px rgba(9, 211, 172, 0.8); }
 }
 
-/* Rotating marker boxes */
-.marker-outer { position: relative; width: 40px; height: 40px; }
+@keyframes terminalLineIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.terminal-line {
+  animation: terminalLineIn 0.15s ease-out backwards;
+}
+
+/* Zone markers — spinner + text box as separate elements (Jamal HUD style) */
+.zone-marker-wrap {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+}
+
+.marker-spinner-box {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.marker-text-box {
+  background: #000;
+  border: 1px solid #d3d3d3;
+  font-family: 'Courier New', monospace;
+  font-size: 1.5vmin;
+  color: #d3d3d3;
+  white-space: nowrap;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+.marker-text-box b { font-weight: 700; }
+
 .rotatingBoxes1 { animation: rotatingBoxesAnim1 2.5s ease infinite; border: 1px solid grey; position: absolute; inset: 0; }
 .rotatingBoxes2 { animation: rotatingBoxesAnim2 2.25s ease infinite; border: 1px solid lightgrey; position: absolute; inset: 0; }
 .rotatingBoxes3 { animation: rotatingBoxesAnim3 2s ease infinite; border: 1px solid darkgrey; position: absolute; inset: 0; }
 
+.marker-active .marker-text-box { border-color: #eab308; color: #eab308; }
 .marker-active .rotatingBoxes1 { border-color: #eab308; }
 .marker-active .rotatingBoxes2 { border-color: #facc15; }
 .marker-active .rotatingBoxes3 { border-color: #fde047; }
 
+.marker-done .marker-text-box { border-color: #09d3ac; color: #09d3ac; }
 .marker-done .rotatingBoxes1 { border-color: #09d3ac; }
 .marker-done .rotatingBoxes2 { border-color: #10b981; }
 .marker-done .rotatingBoxes3 { border-color: #34d399; }
-.marker-done { animation: pulseGlow 2s ease infinite; }
 
-/* Marker label */
-.marker-label {
-  position: absolute;
+/* Side ladder — skewed bars with title + subtitle inside */
+.sideLadderWrapper {
+  position: fixed;
+  right: 16px;
   top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-family: 'Courier New', monospace;
-  font-size: 8px;
-  color: #708090;
-  white-space: nowrap;
-  pointer-events: none;
+  transform: translateY(-50%);
+  z-index: 10;
+  color: #fff;
 }
-.marker-active .marker-label { color: #eab308; }
-.marker-done .marker-label { color: #09d3ac; }
-
-/* Side ladder */
-.side-ladder { position: fixed; right: 0; top: 50%; transform: translateY(-50%); padding: 5px; z-index: 10; }
-.side-ladder-item {
-  border-left: 8px solid rgba(255,255,255,0.15);
-  padding: 6px 12px;
-  margin: 3px 0;
-  transform: skew(15deg);
-  transition: all 0.45s ease;
+.sideLadderItem {
+  display: block;
+  padding: 6px 14px;
+  margin: 5px 0;
+  border-left: 10px solid rgba(255,255,255,0.2);
+  transform: skewX(-15deg);
   cursor: pointer;
-  font-family: 'Courier New', monospace;
-  font-size: 11px;
-  color: #aaa;
-  background: rgba(0,0,0,0.4);
+  transition: transform 0.25s ease, background 0.2s ease;
+  background: rgba(0,0,0,0.45);
   backdrop-filter: blur(4px);
+  min-width: 180px;
 }
-.side-ladder-item:hover { background: #708090; transform: translateX(-25px) skew(15deg); transition: all 0.15s ease; }
-.side-ladder-item > * { transform: skew(-15deg); display: block; }
-
-.side-ladder-item.active { border-left-color: #eab308; color: #eab308; }
-.side-ladder-item.done { border-left-color: #09d3ac; color: #fff; }
-.side-ladder-item.done:hover { background: rgba(9, 211, 172, 0.15); }
-
-.side-ladder-ms { font-size: 9px; color: #708090; margin-top: 2px; }
-.side-ladder-item.done .side-ladder-ms { color: #09d3ac; }
+.sideLadderItem:hover {
+  transform: skewX(-15deg) translateX(-8px);
+  background: rgba(255,255,255,0.06);
+}
+.sideLadderName {
+  display: block;
+  transform: skewX(15deg);
+  font-family: 'BaronNeue-Regular', sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+}
+.sideLadderSub {
+  display: block;
+  transform: skewX(15deg);
+  font-family: 'BaronNeue-Regular', sans-serif;
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+}
 
 /* Location paper — bottom left */
 .location-paper {
@@ -94,16 +137,16 @@
   animation-fill-mode: both;
   color: #708090;
   font-size: 1vw;
-  font-family: 'Google Sans', 'Roboto', sans-serif;
+  font-family: 'BaronNeue-Regular', sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.15em;
 }
 .location-paper-name {
   animation: locationAnim 2.5s ease;
   animation-fill-mode: both;
-  font-size: 3.5vw;
-  font-family: 'Google Sans', 'Roboto', sans-serif;
-  font-weight: 700;
+  font-size: 4vw;
+  font-family: 'BaronNeue-Regular', sans-serif;
+  font-weight: 400;
   color: #fff;
   line-height: 1.1;
   text-transform: uppercase;
@@ -121,8 +164,8 @@
   animation-fill-mode: both;
   color: #708090;
   font-size: 1.5vw;
-  font-family: 'Google Sans', 'Roboto', sans-serif;
-  font-weight: 300;
+  font-family: 'BaronNeue-Regular', sans-serif;
+  font-weight: 400;
   letter-spacing: 0.03em;
   margin-top: 8px;
 }

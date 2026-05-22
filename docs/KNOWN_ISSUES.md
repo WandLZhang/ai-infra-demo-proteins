@@ -1,26 +1,29 @@
-# Known Issues — ai-infra-demo-proteins
+# Known Issues
 
 ## 1. slurm-gcp bulkInsert doesn't support TPU machine types
 
-**Status:** Blocking TPU nodesets on Slurm Cluster Toolkit
-**Error:** `Bulk Insert is not supported for queued requests with TPU machine type 'ct6e-standard-4t'. Use the Instances API or Managed Instance Groups (MIGs) instead.`
+slurm-gcp v6's `ResumeProgram` uses `bulkInsert` which rejects `ct6e-*`. TPU provisioning needs `instances.create` API or MIGs. Additionally ct6e requires `hyperdisk-balanced` disks and `threadsPerCore=2`.
 
-slurm-gcp v6's `ResumeProgram` uses the Compute Engine `bulkInsert` API for all VM provisioning. TPU machine types (ct6e-*) require the regular `instances.create` API or MIGs.
+## 2. Boltz-2 on TPU requires 10 patches
 
-**Workarounds:**
-- Patch `/slurm/scripts/resume.py` to detect `ct6e-*` machine types and use `instances.create` instead of `bulkInsert`
-- Use GKE Autopilot for TPU backends (Autopilot handles TPU natively via nodeSelector)
-- File feature request with slurm-gcp team (SchedMD) to support TPU via Instances API
+Boltz-2's codebase has CUDA-specific dependencies (cuEquivariance, trifast/Triton) and XLA-incompatible patterns (in-place tensor mutation, dynamic autocast). All 10 patches are documented inline in `backends/boltz2-tpu/predict.py`. Upstream issue: [jwohlwend/boltz#485](https://github.com/jwohlwend/boltz/issues/485).
 
-**Additional TPU template requirements discovered:**
-- Disk type: `hyperdisk-balanced` (pd-standard and pd-ssd both rejected by ct6e)
-- SMT/Threading: `threadsPerCore: 2` required (setting 1 rejected by ct6e)
+## 3. Boltz-2 TPU speed gap
 
-## 2. GPU quota = 0 in burst project
+Boltz-2 runs 3.5x slower on TPU vs GPU (248s vs 70s) because the pairformer's triangle einsums use naive PyTorch instead of CUDA's fused cuEquivariance kernels. Profile shows 88% of time in the 48-layer pairformer trunk. Fix: Pallas TPU kernels via [tokamax](https://github.com/openxla/tokamax) (same path AlphaFold 3 uses).
 
-**Status:** Blocking GPU nodesets
-**Error:** `Quota 'NVIDIA_A100_80GB_GPUS' exceeded. Limit: 0.0 in region us-central1.`
+## 4. Boltz-2 confidence module skipped on TPU
 
-New GCP projects start with 0 GPU quota. Need to request A100 quota increase.
+`torch.bmm` shape inference fails on XLA when `multiplicity > 0`. Confidence scores (pLDDT, pTM) are NOT produced in TPU output. Structure coordinates are unaffected. Fix: pre-reshape tensors to static batch dims before bmm.
 
-**Workaround:** Use GPU backends from the existing aero-sim project (`wz-ai-infra-demo-2026-05`) which has working H100 quota.
+## 5. Spot TPU preemption frequency
+
+TPU v6e Spot in us-central1-b was preempted every 2-4 hours during testing. Long inference runs (>30 min) need DWS Flex Start or on-demand. Boltz-2 hemoglobin (248s) fits within the window; larger proteins may not.
+
+## 6. AF2 GPU — Spot preemption during testing
+
+A100 GPU VMs were preempted 3 times before a successful run. AF2 GPU inference (146.7s cold) requires the full session to complete without interruption.
+
+## 7. AlphaFold 2 — synthetic MSA
+
+GPU and TPU AF2 runs use synthetic MSA (random gaps, no real evolutionary data). pLDDT scores (42-49) are lower than production AF2 with real MSA databases. Structure topology is correct but confidence is underestimated.
