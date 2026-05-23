@@ -70,34 +70,23 @@ def submit():
     if latest and latest.get("all_complete"):
         _delete_run(latest["run_id"])
 
-    # Trigger predict.sh on the controller VM via SSH
-    result = subprocess.run(
-        [
-            "gcloud", "compute", "ssh", CONTROLLER_VM,
-            f"--zone={CONTROLLER_ZONE}",
-            f"--project={CONTROLLER_PROJECT}",
-            "--tunnel-through-iap",
-            f"--command=bash {PREDICT_SCRIPT} {protein_id}",
-        ],
-        capture_output=True, text=True, timeout=60,
+    # Write a trigger blob to GCS. The controller VM watches for these
+    # and runs predict.sh when one appears.
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    bucket = get_bucket()
+    trigger = {
+        "run_id": run_id,
+        "protein_id": protein_id,
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    bucket.blob(f"triggers/{run_id}.json").upload_from_string(
+        json.dumps(trigger, indent=2), content_type="application/json"
     )
-
-    lines = result.stdout.strip().split("\n")
-    run_id = None
-    dispatch_lines = []
-    for line in lines:
-        if line.startswith("Run ID:"):
-            run_id = line.split(":", 1)[1].strip()
-        elif line.startswith("Submitted "):
-            dispatch_lines.append(line)
-
-    if not run_id:
-        return jsonify({"error": "Failed to start run", "stdout": result.stdout, "stderr": result.stderr}), 500
 
     return jsonify({
         "run_id": run_id,
         "already_running": False,
-        "dispatch_lines": dispatch_lines,
+        "dispatch_lines": [f"Trigger written to gs://{BUCKET_NAME}/triggers/{run_id}.json"],
     })
 
 

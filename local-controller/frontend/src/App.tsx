@@ -69,12 +69,12 @@ export default function App() {
     }, 2000)
   }, [updateLane])
 
-  // On page load: check for in-progress run (refresh resilience)
+  // On page load: render any existing run's state but keep map at Building 12.
+  // The zoom-out choreography only happens when the user presses Enter.
   useEffect(() => {
     getLatestRun().then(latest => {
       if (latest && !latest.all_complete) {
         setActiveRunId(latest.run_id)
-        setPhase('running')
         for (const [backendId, blob] of Object.entries(latest.lanes)) {
           const update = blobToLaneStatus(blob, backendId as BackendId)
           updateLane(backendId as BackendId, update)
@@ -86,7 +86,6 @@ export default function App() {
           const update = blobToLaneStatus(blob, backendId as BackendId)
           updateLane(backendId as BackendId, update)
         }
-        setPhase('done')
         setShowScorecard(true)
       }
     }).catch(() => {})
