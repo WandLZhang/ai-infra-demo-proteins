@@ -41,6 +41,7 @@ export default function App() {
   const [infoOpen, setInfoOpen] = useState(false)
   const lineQueue = useRef<string[]>([])
   const dripRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [zoneStates, setZoneStates] = useState<Record<string, string>>({})
 
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
@@ -71,10 +72,27 @@ export default function App() {
       if (typeof item === 'object' && (item as any).__laneUpdate) {
         const { backendId, update } = item as any
         updateLane(backendId as BackendId, update)
-      } else if (typeof item === 'object' && (item as any).__text) {
-        setDispatchLines(prev => [...prev, (item as any).__text])
-      } else if (typeof item === 'string') {
-        setDispatchLines(prev => [...prev, item])
+      } else {
+        const text = typeof item === 'string' ? item : (item as any).__text || ''
+        if (text) {
+          setDispatchLines(prev => [...prev, text])
+          // Parse zone from log events and update map markers
+          const nodeMatch = text.match(/nihprotein-(\w+?)(?:east5|central1|west1|south1|east1|east4|east7)/)
+          const zoneMatch = text.match(/(?:us-(?:east5|central1|west1|south1|east1|east4|east7))/)
+          if (text.includes('no Spot capacity') || text.includes('no capacity')) {
+            const region = text.match(/in\s+(\S+)/)?.[1] || ''
+            const zone = region.includes('east5') ? 'us-east5' : region.includes('central1') ? 'us-central1' : region.includes('west1') ? 'us-west1' : region.includes('south1') ? 'us-south1' : region.includes('east1') ? 'us-east1' : ''
+            if (zone) setZoneStates(prev => ({ ...prev, [zone]: 'failed' }))
+          } else if (text.includes('allocating on') || text.includes('loading model') || text.includes('inferring')) {
+            const zone = text.includes('east5a') ? 'us-east5' : text.includes('central1') ? 'us-central1' : text.includes('west1') ? 'us-west1' : text.includes('east5b') ? 'us-east5' : ''
+            if (zone) setZoneStates(prev => ({ ...prev, [zone]: 'active' }))
+          } else if (text.includes('sched: allocate')) {
+            const zone = text.includes('east5') ? 'us-east5' : text.includes('central1') ? 'us-central1' : text.includes('west1') ? 'us-west1' : ''
+            if (zone) setZoneStates(prev => ({ ...prev, [zone]: 'provisioning' }))
+          } else if (text.includes('requeue') && text.includes('next zone')) {
+            // requeue doesn't change zone state — the next sched event will
+          }
+        }
       }
 
       // Peek at next item's timestamp to calculate delay
@@ -195,7 +213,7 @@ export default function App() {
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#171717', overflow: 'hidden', position: 'relative' }}>
       {/* Fullscreen map — zoom driven by phase */}
-      <InfraMap lanes={lanes} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} />
+      <InfraMap lanes={lanes} zoneStates={zoneStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} />
 
       {/* Top-left: Hamburger menu */}
       <div style={{ position: 'fixed', top: 15, left: 15, zIndex: 25 }}>
