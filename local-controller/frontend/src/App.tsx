@@ -292,7 +292,7 @@ export default function App() {
         <div className="location-paper-coords" style={{ transition: 'opacity 0.8s ease' }}>
           {phase === 'home'
             ? 'Lat: 38.9988, Lng: -77.1020 | Biowulf HPC'
-            : `${currentProtein.uniprotId} · ${currentProtein.residueCount} AA${savingsStr ? ' · ' + savingsStr : ''}`}
+            : `${currentProtein.uniprotId} · ${currentProtein.residueCount} AA`}
         </div>
       </div>
 
