@@ -54,7 +54,7 @@ update_state() {
   local EXTRA="${2:-}"
   local NOW=$(date +%s)
   local ELAPSED_MS=$(( (NOW - START_TIME) * 1000 ))
-  local COST=$(printf "%.10f" "$(echo "$ELAPSED_MS * $PRICE_PER_SEC / 1000" | bc -l 2>/dev/null || echo "0")")
+  local COST=$(printf "%.4f" "$(echo "$ELAPSED_MS * $PRICE_PER_SEC / 1000" | bc -l 2>/dev/null || echo "0")")
 
   local COMPLETED="null"
   local RESULT="null"
