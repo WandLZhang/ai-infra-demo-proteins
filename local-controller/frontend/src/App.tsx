@@ -86,7 +86,7 @@ export default function App() {
         const nextTs = next?.ts || next?.__ts
         if (currTs && nextTs) {
           const gap = new Date(nextTs).getTime() - new Date(currTs).getTime()
-          delay = Math.max(300, Math.min(gap, 3000))
+          delay = Math.max(100, gap)
         }
       }
       dripRef.current = setTimeout(drainNext, delay) as any
