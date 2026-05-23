@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
 PROTEIN_ID="${1:-hemoglobin}"
-RUN_ID="$(date +%Y%m%d-%H%M%S)"
+RUN_ID="${RUN_ID_OVERRIDE:-$(date +%Y%m%d-%H%M%S)}"
 JOBS_PREFIX="jobs/$RUN_ID"
 
 # Protein sequences (same as frontend PROTEINS array)
