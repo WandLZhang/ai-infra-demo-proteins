@@ -43,7 +43,7 @@ update_state() {
   local EXTRA="${2:-}"
   local NOW=$(date +%s)
   local ELAPSED_MS=$(( (NOW - START_TIME) * 1000 ))
-  local COST=$(echo "$ELAPSED_MS * $PRICE_PER_SEC / 1000" | bc -l 2>/dev/null || echo "0")
+  local COST=$(printf "%.10f" "$(echo "$ELAPSED_MS * $PRICE_PER_SEC / 1000" | bc -l 2>/dev/null || echo "0")")
 
   local COMPLETED="null"
   local RESULT="null"
@@ -136,7 +136,7 @@ fi
 # ── Phase 4: Done ────────────────────────────────────────────────────
 NOW=$(date +%s)
 ELAPSED_MS=$(( (NOW - START_TIME) * 1000 ))
-COST=$(echo "$ELAPSED_MS * $PRICE_PER_SEC / 1000" | bc -l 2>/dev/null || echo "0")
+COST=$(printf "%.10f" "$(echo "$ELAPSED_MS * $PRICE_PER_SEC / 1000" | bc -l 2>/dev/null || echo "0")")
 RESULT_JSON="{\"output_gcs_path\":\"$GCS_OUTPUT_PATH\",\"output_chars\":$OUTPUT_CHARS,\"solve_time_ms\":$ELAPSED_MS,\"model\":\"$MODEL\",\"silicon\":\"$SILICON\",\"seq_len\":${#SEQUENCE}}"
 
 update_state "done" "$RESULT_JSON"
