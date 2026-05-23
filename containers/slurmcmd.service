@@ -1,0 +1,6 @@
+[Unit]
+Description=Slurm command sync
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true

@@ -1,0 +1,9 @@
+[Unit]
+Description=Slurm command sync timer
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=300
+
+[Install]
+WantedBy=timers.target
