@@ -80,13 +80,24 @@ export default function App() {
           pollEvents(runId),
         ])
 
-        // Queue lane updates to drip alongside log lines
+        // Queue lane updates — expand state jumps into intermediate steps
+        const STATE_ORDER = ['idle', 'queued', 'allocating', 'loading', 'inferring', 'done']
         for (const [backendId, blob] of Object.entries(status.lanes)) {
           const newState = blob.state || 'idle'
-          const oldState = prevStates.current[backendId]
+          const oldState = prevStates.current[backendId] || 'idle'
           if (newState !== oldState && newState !== 'idle') {
-            const update = blobToLaneStatus(blob, backendId as BackendId)
-            lineQueue.current.push({ __laneUpdate: true, backendId, update } as any)
+            const oldIdx = STATE_ORDER.indexOf(oldState)
+            const newIdx = STATE_ORDER.indexOf(newState)
+            const steps = STATE_ORDER.slice(Math.max(oldIdx + 1, 1), newIdx + 1)
+            for (const step of steps) {
+              const partial: Partial<LaneStatus> = { backendId: backendId as BackendId, state: step as LaneStatus['state'] }
+              if (step === 'done') {
+                const full = blobToLaneStatus(blob, backendId as BackendId)
+                lineQueue.current.push({ __laneUpdate: true, backendId, update: full } as any)
+              } else {
+                lineQueue.current.push({ __laneUpdate: true, backendId, update: partial } as any)
+              }
+            }
           }
           prevStates.current[backendId] = newState
         }
@@ -250,17 +261,18 @@ export default function App() {
       {/* Side ladder — always visible, fills with values as backends complete */}
       <SideLadder lanes={lanes} onSelect={() => {}} />
 
-      {/* Location paper — cross-fade between home and running states */}
-      <div className="location-paper" style={{ position: 'relative' }}>
-        <div style={{ opacity: phase === 'home' ? 1 : 0, transition: 'opacity 1.2s ease-in-out', position: phase === 'home' ? 'relative' : 'absolute', top: 0, left: 0 }}>
-          <div className="location-paper-region">BUILDING 12</div>
-          <div className="location-paper-name">NIH BETHESDA</div>
-          <div className="location-paper-coords">Lat: 38.9988, Lng: -77.1020 | Biowulf HPC</div>
+      {/* Location paper */}
+      <div className="location-paper">
+        <div className="location-paper-region" style={{ transition: 'opacity 0.8s ease' }}>
+          {phase === 'home' ? 'BUILDING 12' : (selectedZone?.label || 'BIOWULF — MULTI-REGION BURST')}
         </div>
-        <div style={{ opacity: phase !== 'home' ? 1 : 0, transition: 'opacity 1.2s ease-in-out', position: phase !== 'home' ? 'relative' : 'absolute', top: 0, left: 0 }}>
-          <div className="location-paper-region">{selectedZone?.label || 'BIOWULF — MULTI-REGION BURST'}</div>
-          <div className="location-paper-name">{currentProtein.name.toUpperCase()}</div>
-          <div className="location-paper-coords">{currentProtein.uniprotId} · {currentProtein.residueCount} AA{savingsStr ? ' · ' + savingsStr : ''}</div>
+        <div className="location-paper-name" style={{ transition: 'opacity 0.8s ease' }}>
+          {phase === 'home' ? 'NIH BETHESDA' : currentProtein.name.toUpperCase()}
+        </div>
+        <div className="location-paper-coords" style={{ transition: 'opacity 0.8s ease' }}>
+          {phase === 'home'
+            ? 'Lat: 38.9988, Lng: -77.1020 | Biowulf HPC'
+            : `${currentProtein.uniprotId} · ${currentProtein.residueCount} AA${savingsStr ? ' · ' + savingsStr : ''}`}
         </div>
       </div>
 
