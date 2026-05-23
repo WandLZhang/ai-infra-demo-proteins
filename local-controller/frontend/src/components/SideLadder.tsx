@@ -10,13 +10,12 @@ interface SideLadderProps {
 function stateLabel(state: string): string {
   switch (state) {
     case 'idle': return 'ready'
-    case 'queued': return 'queued'
-    case 'allocating': return 'allocating spot'
-    case 'pulling': return 'pulling container'
+    case 'queued': return 'provisioning...'
+    case 'allocating': return 'provisioning...'
     case 'loading': return 'loading model'
     case 'inferring': return 'inferring...'
     case 'done': return 'complete'
-    case 'failed': return 'failed'
+    case 'failed': return 'no capacity'
     default: return state
   }
 }
@@ -33,10 +32,10 @@ export default function SideLadder({ lanes, onSelect }: SideLadderProps) {
         const ratio = cheapest && cost > 0 ? cost / cheapest : null
 
         let borderColor = 'rgba(255, 255, 255, 0.2)'
-        if (lane.state !== 'idle' && lane.state !== 'done' && lane.state !== 'failed') {
+        if (lane.state === 'queued' || lane.state === 'allocating') {
           borderColor = 'rgba(244, 180, 0, 0.7)'
         }
-        if (lane.state === 'done') {
+        if (lane.state === 'loading' || lane.state === 'inferring' || lane.state === 'done') {
           borderColor = 'rgba(15, 157, 88, 0.7)'
         }
         if (lane.state === 'failed') {
