@@ -250,14 +250,17 @@ export default function App() {
       {/* Side ladder — always visible, fills with values as backends complete */}
       <SideLadder lanes={lanes} onSelect={() => {}} />
 
-      {/* Location paper — persistent. Shows Building 12 / NIH BETHESDA as home base. */}
-      <div className="location-paper">
-        <div className="location-paper-region">{phase === 'home' ? 'BUILDING 12' : (selectedZone?.label || 'BIOWULF — MULTI-REGION BURST')}</div>
-        <div className="location-paper-name">{phase === 'home' ? 'NIH BETHESDA' : currentProtein.name.toUpperCase()}</div>
-        <div className="location-paper-coords">
-          {phase === 'home'
-            ? 'Lat: 38.9988, Lng: -77.1020 | Biowulf HPC'
-            : `${currentProtein.uniprotId} · ${currentProtein.residueCount} AA${savingsStr ? ' · ' + savingsStr : ''}`}
+      {/* Location paper — cross-fade between home and running states */}
+      <div className="location-paper" style={{ position: 'relative' }}>
+        <div style={{ opacity: phase === 'home' ? 1 : 0, transition: 'opacity 1.2s ease-in-out', position: phase === 'home' ? 'relative' : 'absolute', top: 0, left: 0 }}>
+          <div className="location-paper-region">BUILDING 12</div>
+          <div className="location-paper-name">NIH BETHESDA</div>
+          <div className="location-paper-coords">Lat: 38.9988, Lng: -77.1020 | Biowulf HPC</div>
+        </div>
+        <div style={{ opacity: phase !== 'home' ? 1 : 0, transition: 'opacity 1.2s ease-in-out', position: phase !== 'home' ? 'relative' : 'absolute', top: 0, left: 0 }}>
+          <div className="location-paper-region">{selectedZone?.label || 'BIOWULF — MULTI-REGION BURST'}</div>
+          <div className="location-paper-name">{currentProtein.name.toUpperCase()}</div>
+          <div className="location-paper-coords">{currentProtein.uniprotId} · {currentProtein.residueCount} AA{savingsStr ? ' · ' + savingsStr : ''}</div>
         </div>
       </div>
 
