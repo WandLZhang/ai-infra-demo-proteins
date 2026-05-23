@@ -1,6 +1,8 @@
-import type { BackendId, LaneStatus, PredictResponse } from './types'
+import type { BackendId, LaneStatus } from './types'
 
 const STATE_SERVER = (import.meta as any).env?.VITE_STATE_SERVER || 'http://localhost:8080'
+const GCS_BUCKET = 'wz-nih-demo-shared'
+const GCS_BASE = `https://storage.googleapis.com/${GCS_BUCKET}`
 
 export interface SubmitResult {
   run_id: string
@@ -22,12 +24,6 @@ export interface RunStatus {
   run_id: string
   lanes: Record<string, LaneStatusBlob>
   all_complete: boolean
-  manifest?: {
-    protein_id: string
-    sequence_length: number
-    submitted_at: string
-    status: string
-  }
 }
 
 export interface LaneStatusBlob {
@@ -49,18 +45,56 @@ export interface LaneStatusBlob {
   error?: string | null
 }
 
-export async function pollStatus(runId: string): Promise<RunStatus> {
-  const resp = await fetch(`${STATE_SERVER}/api/status/${runId}`)
-  if (!resp.ok) throw new Error(`Status failed: HTTP ${resp.status}`)
+const ALL_BACKENDS: BackendId[] = [
+  'af2-tpu', 'af2-gpu', 'esmfold-tpu', 'esmfold-gpu', 'boltz2-tpu', 'boltz2-gpu',
+]
+
+async function fetchGcsJson(path: string): Promise<any | null> {
+  const resp = await fetch(`${GCS_BASE}/${path}`, { cache: 'no-store' })
+  if (!resp.ok) return null
   return resp.json()
 }
 
+export async function pollStatus(runId: string): Promise<RunStatus> {
+  const lanes: Record<string, LaneStatusBlob> = {}
+
+  const results = await Promise.all(
+    ALL_BACKENDS.map(async (bid) => {
+      const blob = await fetchGcsJson(`jobs/${runId}/${bid}.json`)
+      return { bid, blob }
+    })
+  )
+
+  for (const { bid, blob } of results) {
+    lanes[bid] = blob || { backend_id: bid, run_id: runId, state: 'idle' }
+  }
+
+  const all_complete = ALL_BACKENDS.every(
+    b => lanes[b]?.state === 'done' || lanes[b]?.state === 'failed'
+  )
+
+  return { run_id: runId, lanes, all_complete }
+}
+
 export async function getLatestRun(): Promise<RunStatus | null> {
-  const resp = await fetch(`${STATE_SERVER}/api/latest`)
-  if (!resp.ok) throw new Error(`Latest failed: HTTP ${resp.status}`)
+  const resp = await fetch(
+    `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o?prefix=jobs/&delimiter=/`,
+    { cache: 'no-store' }
+  )
+  if (!resp.ok) return null
   const data = await resp.json()
-  if (!data.run_id) return null
-  return data
+
+  const prefixes: string[] = data.prefixes || []
+  if (prefixes.length === 0) return null
+
+  const runIds = prefixes
+    .map((p: string) => p.replace('jobs/', '').replace('/', ''))
+    .filter(Boolean)
+    .sort()
+    .reverse()
+
+  const latestId = runIds[0]
+  return pollStatus(latestId)
 }
 
 export function blobToLaneStatus(blob: LaneStatusBlob, backendId: BackendId): Partial<LaneStatus> {
