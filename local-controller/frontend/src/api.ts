@@ -76,6 +76,16 @@ export async function pollStatus(runId: string): Promise<RunStatus> {
   return { run_id: runId, lanes, all_complete }
 }
 
+export interface SlurmEvent {
+  ts: string
+  msg: string
+}
+
+export async function pollEvents(runId: string): Promise<SlurmEvent[]> {
+  const data = await fetchGcsJson(`jobs/${runId}/events.json`)
+  return data || []
+}
+
 export async function getLatestRun(): Promise<RunStatus | null> {
   const resp = await fetch(
     `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o?prefix=jobs/&delimiter=/`,

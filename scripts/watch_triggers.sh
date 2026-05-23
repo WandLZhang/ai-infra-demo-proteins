@@ -40,6 +40,10 @@ while true; do
         echo "  $line"
       done
       echo "[$(date)] predict.sh complete for $RUN_ID"
+
+      # Start squeue poller in background to stream live state to GCS
+      echo "[$(date)] Starting squeue poller for $RUN_ID"
+      bash "$SCRIPT_DIR/poll_squeue.sh" "$RUN_ID" >> /tmp/poll_squeue.log 2>&1 &
     else
       echo "[$(date)] ERROR: Could not parse trigger: $TRIGGER_JSON"
     fi

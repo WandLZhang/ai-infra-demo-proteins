@@ -1,17 +1,18 @@
-import React, { useState } from 'react'
+import React from 'react'
 
 interface InfoButtonProps {
   title: string
   sections: { body: string }[]
+  open: boolean
+  onToggle: () => void
 }
 
-export default function InfoButton({ title, sections }: InfoButtonProps) {
-  const [open, setOpen] = useState(false)
+export default function InfoButton({ title, sections, open, onToggle }: InfoButtonProps) {
 
   return (
     <>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={onToggle}
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'white', padding: 8 }}
       >
         <span className="material-icons" style={{ fontSize: 28 }}>info_outline</span>

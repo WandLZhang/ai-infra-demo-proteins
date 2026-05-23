@@ -7,7 +7,7 @@ import Scorecard from './components/Scorecard'
 import InfoButton from './components/InfoButton'
 import type { Protein, ModelId, BackendId, LaneStatus, PredictResponse } from './types'
 import { BACKENDS } from './backends'
-import { submitRun, pollStatus, getLatestRun, blobToLaneStatus } from './api'
+import { submitRun, pollStatus, pollEvents, getLatestRun, blobToLaneStatus } from './api'
 
 const PROTEINS: Protein[] = [
   { id: 'brca1', name: 'BRCA1 BRCT', sequence: 'NAMEESVSREKPELTASTERVNKRMS...', uniprotId: 'P38398', description: 'Breast cancer tumor suppressor — DNA repair', residueCount: 214 },
@@ -38,6 +38,7 @@ export default function App() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [dispatchLines, setDispatchLines] = useState<string[]>([])
+  const [infoOpen, setInfoOpen] = useState(false)
 
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
@@ -48,14 +49,29 @@ export default function App() {
     setLanes(prev => ({ ...prev, [id]: { ...prev[id], ...update } }))
   }, [])
 
+  const lastEventCount = useRef(0)
+
   const startPolling = useCallback((runId: string) => {
     if (pollRef.current) clearInterval(pollRef.current)
+    lastEventCount.current = 0
     pollRef.current = setInterval(async () => {
       try {
-        const status = await pollStatus(runId)
+        const [status, events] = await Promise.all([
+          pollStatus(runId),
+          pollEvents(runId),
+        ])
         for (const [backendId, blob] of Object.entries(status.lanes)) {
           const update = blobToLaneStatus(blob, backendId as BackendId)
           updateLane(backendId as BackendId, update)
+        }
+        if (events.length > lastEventCount.current) {
+          const newMsgs = events.slice(lastEventCount.current)
+            .map(e => e.msg)
+            .filter(m => !m.startsWith('squeue poller'))
+          if (newMsgs.length > 0) {
+            setDispatchLines(prev => [...prev, ...newMsgs])
+          }
+          lastEventCount.current = events.length
         }
         if (status.all_complete) {
           if (pollRef.current) clearInterval(pollRef.current)
@@ -69,26 +85,7 @@ export default function App() {
     }, 2000)
   }, [updateLane])
 
-  // On page load: render any existing run's state but keep map at Building 12.
-  // The zoom-out choreography only happens when the user presses Enter.
   useEffect(() => {
-    getLatestRun().then(latest => {
-      if (latest && !latest.all_complete) {
-        setActiveRunId(latest.run_id)
-        for (const [backendId, blob] of Object.entries(latest.lanes)) {
-          const update = blobToLaneStatus(blob, backendId as BackendId)
-          updateLane(backendId as BackendId, update)
-        }
-        startPolling(latest.run_id)
-      } else if (latest?.all_complete) {
-        setActiveRunId(latest.run_id)
-        for (const [backendId, blob] of Object.entries(latest.lanes)) {
-          const update = blobToLaneStatus(blob, backendId as BackendId)
-          updateLane(backendId as BackendId, update)
-        }
-        setShowScorecard(true)
-      }
-    }).catch(() => {})
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
 
@@ -101,18 +98,11 @@ export default function App() {
     try {
       const result = await submitRun(currentProtein.id)
       setActiveRunId(result.run_id)
-      if (result.dispatch_lines) {
-        setDispatchLines(result.dispatch_lines)
-      }
-      if (result.already_running) {
-        setDispatchLines(['Resuming existing run...'])
-      }
-      await delay(1500)
       setPhase('running')
       startPolling(result.run_id)
     } catch (err) {
       console.error('Submit failed:', err)
-      setDispatchLines([`Error: state server unreachable (${err})`])
+      setDispatchLines([`Error: ${err}`])
       setPhase('home')
     }
   }, [currentProtein, startPolling])
@@ -120,7 +110,10 @@ export default function App() {
   // Enter key triggers submit (terminal UX)
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && phase === 'home') handleSubmit()
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        if (phase === 'home') handleSubmit()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -197,8 +190,8 @@ export default function App() {
         zIndex: 20,
         background: '#000', border: '1px solid #d3d3d3', padding: 12,
         fontFamily: "'Courier New', Courier, monospace", fontSize: '1.5vmin',
-        color: '#d3d3d3', maxWidth: '30vw', whiteSpace: 'pre-wrap' as const,
-        cursor: 'default',
+        color: '#d3d3d3', maxWidth: '30vw', maxHeight: '45vh', overflowY: 'auto' as const,
+        whiteSpace: 'pre-wrap' as const, cursor: 'default',
       }}>
         <div style={{ color: '#708090', fontSize: '1.2vmin' }}>Last login: {new Date().toLocaleString()} on tty1</div>
         <div style={{ color: '#d3d3d3' }}>researcher@biowulf-bld12:~$ <span style={{ color: '#09d3ac' }}>sbatch predict.sh \</span></div>
@@ -210,18 +203,30 @@ export default function App() {
         {(phase === 'dispatching' || phase === 'running' || phase === 'done') && dispatchLines.length > 0 && (
           <>
             {dispatchLines.map((line, i) => (
-              <div key={i} className="terminal-line" style={{ color: '#eab308', marginTop: i === 0 ? 6 : 0, animationDelay: `${0.1 + i * 0.15}s` }}>{line}</div>
+              <div key={i} className="terminal-line" style={{ color: '#eab308', marginTop: i === 0 ? 6 : 0 }}>{line}</div>
             ))}
-            <div className="terminal-line" style={{ color: '#eab308', marginTop: 4, animationDelay: `${0.1 + dispatchLines.length * 0.15}s` }}>
-              squeue: {dispatchLines.length} jobs PENDING → Spot allocating...
-            </div>
           </>
         )}
-        {(phase === 'running' || phase === 'done') && (
-          <div className="terminal-line" style={{ color: phase === 'done' ? '#09d3ac' : '#eab308', marginTop: 4, animationDelay: '1.2s' }}>
-            squeue: {Object.values(lanes).filter(l => l.state === 'done').length}/6 complete
-          </div>
-        )}
+        {(phase === 'running' || phase === 'done') && (() => {
+          const laneVals = Object.values(lanes)
+          const done = laneVals.filter(l => l.state === 'done').length
+          const failed = laneVals.filter(l => l.state === 'failed').length
+          const allocating = laneVals.filter(l => l.state === 'allocating').length
+          const inferring = laneVals.filter(l => l.state === 'inferring').length
+          const queued = laneVals.filter(l => l.state === 'queued').length
+          const parts: string[] = []
+          if (allocating > 0) parts.push(`${allocating} CONFIGURING`)
+          if (inferring > 0) parts.push(`${inferring} RUNNING`)
+          if (queued > 0) parts.push(`${queued} PENDING`)
+          if (done > 0) parts.push(`${done} COMPLETED`)
+          if (failed > 0) parts.push(`${failed} FAILED`)
+          const summary = parts.length > 0 ? parts.join(', ') : 'waiting...'
+          return (
+            <div className="terminal-line" style={{ color: phase === 'done' ? '#09d3ac' : '#eab308', marginTop: 4 }}>
+              squeue: {summary}
+            </div>
+          )
+        })()}
         {phase === 'done' && <div className="terminal-line" style={{ color: '#09d3ac' }}>researcher@biowulf-bld12:~$ ▌</div>}
       </div>
 
@@ -249,6 +254,8 @@ export default function App() {
       {/* Info button — top right, same style as hamburger menu */}
       <div style={{ position: 'fixed', top: 15, right: 15, zIndex: 25 }}>
       <InfoButton
+        open={infoOpen}
+        onToggle={() => setInfoOpen(!infoOpen)}
         title={
           phase === 'home' ? 'Biowulf Home' :
           phase === 'dispatching' ? 'Dispatching' :
