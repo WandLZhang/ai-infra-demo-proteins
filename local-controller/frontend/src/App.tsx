@@ -57,22 +57,41 @@ export default function App() {
 
   const startPolling = useCallback((runId: string) => {
     if (pollRef.current) clearInterval(pollRef.current)
-    if (dripRef.current) clearInterval(dripRef.current)
+    if (dripRef.current) clearTimeout(dripRef.current)
     lastEventCount.current = 0
     prevStates.current = {}
     lineQueue.current = []
 
-    dripRef.current = setInterval(() => {
+    const drainNext = () => {
+      if (lineQueue.current.length === 0) {
+        dripRef.current = setTimeout(drainNext, 500) as any
+        return
+      }
+      const item = lineQueue.current.shift()!
+      if (typeof item === 'object' && (item as any).__laneUpdate) {
+        const { backendId, update } = item as any
+        updateLane(backendId as BackendId, update)
+      } else if (typeof item === 'object' && (item as any).__text) {
+        setDispatchLines(prev => [...prev, (item as any).__text])
+      } else if (typeof item === 'string') {
+        setDispatchLines(prev => [...prev, item])
+      }
+
+      // Peek at next item's timestamp to calculate delay
+      let delay = 600
       if (lineQueue.current.length > 0) {
-        const next = lineQueue.current.shift()!
-        if (typeof next === 'object' && (next as any).__laneUpdate) {
-          const { backendId, update } = next as any
-          updateLane(backendId as BackendId, update)
-        } else {
-          setDispatchLines(prev => [...prev, next as string])
+        const curr = item as any
+        const next = lineQueue.current[0] as any
+        const currTs = curr?.ts || curr?.__ts
+        const nextTs = next?.ts || next?.__ts
+        if (currTs && nextTs) {
+          const gap = new Date(nextTs).getTime() - new Date(currTs).getTime()
+          delay = Math.max(300, Math.min(gap, 3000))
         }
       }
-    }, 800)
+      dripRef.current = setTimeout(drainNext, delay) as any
+    }
+    dripRef.current = setTimeout(drainNext, 500) as any
     pollRef.current = setInterval(async () => {
       try {
         const [status, events] = await Promise.all([
@@ -90,12 +109,13 @@ export default function App() {
             const newIdx = STATE_ORDER.indexOf(newState)
             const steps = STATE_ORDER.slice(Math.max(oldIdx + 1, 1), newIdx + 1)
             for (const step of steps) {
-              const partial: Partial<LaneStatus> = { backendId: backendId as BackendId, state: step as LaneStatus['state'] }
+              const ts = blob.completed_at || blob.started_at || new Date().toISOString()
               if (step === 'done') {
                 const full = blobToLaneStatus(blob, backendId as BackendId)
-                lineQueue.current.push({ __laneUpdate: true, backendId, update: full } as any)
+                lineQueue.current.push({ __laneUpdate: true, __ts: ts, backendId, update: full } as any)
               } else {
-                lineQueue.current.push({ __laneUpdate: true, backendId, update: partial } as any)
+                const partial: Partial<LaneStatus> = { backendId: backendId as BackendId, state: step as LaneStatus['state'] }
+                lineQueue.current.push({ __laneUpdate: true, __ts: ts, backendId, update: partial } as any)
               }
             }
           }
@@ -107,7 +127,7 @@ export default function App() {
             .map(e => e.msg)
             .filter(m => !m.startsWith('squeue poller'))
           if (newMsgs.length > 0) {
-            lineQueue.current.push(...newMsgs)
+            lineQueue.current.push(...newMsgs.map(m => ({ __text: m, ts: events[lastEventCount.current]?.ts } as any)))
           }
           lastEventCount.current = events.length
         }
@@ -127,7 +147,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
-      if (dripRef.current) clearInterval(dripRef.current)
+      if (dripRef.current) clearTimeout(dripRef.current)
     }
   }, [])
 
