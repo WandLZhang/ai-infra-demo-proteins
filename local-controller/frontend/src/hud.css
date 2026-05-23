@@ -169,6 +169,20 @@
   letter-spacing: 0.03em;
   margin-top: 8px;
 }
+/* Info box links and code */
+.info-body a {
+  color: #09d3ac;
+  text-decoration: none;
+}
+.info-body a:hover {
+  text-decoration: underline;
+}
+.info-body code {
+  font-family: 'Courier New', monospace;
+  color: #eab308;
+  font-size: 12px;
+}
+
 .location-paper-cost {
   animation: locationAnim 2.5s ease;
   animation-delay: 0.85s;

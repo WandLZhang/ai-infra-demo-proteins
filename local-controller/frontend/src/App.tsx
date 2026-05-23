@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import './hud.css'
 
 import InfraMap, { type ZoneInfo, BIOWULF_HOME } from './components/InfraMap'
@@ -7,6 +7,7 @@ import Scorecard from './components/Scorecard'
 import InfoButton from './components/InfoButton'
 import type { Protein, ModelId, BackendId, LaneStatus, PredictResponse } from './types'
 import { BACKENDS } from './backends'
+import { submitRun, pollStatus, getLatestRun, blobToLaneStatus } from './api'
 
 const PROTEINS: Protein[] = [
   { id: 'brca1', name: 'BRCA1 BRCT', sequence: 'NAMEESVSREKPELTASTERVNKRMS...', uniprotId: 'P38398', description: 'Breast cancer tumor suppressor — DNA repair', residueCount: 214 },
@@ -34,11 +35,10 @@ export default function App() {
   const [currentProtein, setCurrentProtein] = useState<Protein>(PROTEINS[0])
   const [proteinMenuOpen, setProteinMenuOpen] = useState(false)
   const [selectedZone, setSelectedZone] = useState<ZoneInfo | null>(null)
-  const costIntervals = useRef<Record<string, ReturnType<typeof setInterval>>>({})
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
+  const [dispatchLines, setDispatchLines] = useState<string[]>([])
 
-  // Home: offset SE of Building 12 so the marker lands above-left of the terminal
-  // At zoom 12: 1° lng ≈ 2913px, 1° lat ≈ 3747px. Terminal is ~500x120px centered.
-  // Marker needs to be ~280px left and ~90px above center (above terminal top-left)
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
     : { lat: 39.5, lng: -98.35 }
@@ -48,62 +48,105 @@ export default function App() {
     setLanes(prev => ({ ...prev, [id]: { ...prev[id], ...update } }))
   }, [])
 
-  const simulateLane = useCallback(async (backendId: BackendId, protein: Protein) => {
-    const backend = BACKENDS.find(b => b.id === backendId)!
-    const now = Date.now()
-    updateLane(backendId, { state: 'queued', startedAt: now, costAccumulated: 0, result: null, error: null })
-    await delay(200 + Math.random() * 300)
-    updateLane(backendId, { state: 'allocating' })
-    await delay(backend.siliconId === 'tpu' ? 500 + Math.random() * 1500 : 1000 + Math.random() * 2500)
-
-    const costInterval = setInterval(() => {
-      setLanes(prev => {
-        const lane = prev[backendId]
-        if (lane.state === 'done' || lane.state === 'failed' || lane.state === 'idle') return prev
-        return { ...prev, [backendId]: { ...lane, costAccumulated: ((Date.now() - (lane.startedAt || now)) / 1000) * backend.pricePerSec } }
-      })
-    }, 100)
-    costIntervals.current[backendId] = costInterval
-
-    updateLane(backendId, { state: 'pulling' })
-    await delay(400 + Math.random() * 800)
-    updateLane(backendId, { state: 'loading' })
-    await delay(600 + Math.random() * 1200)
-    updateLane(backendId, { state: 'inferring' })
-
-    const t = backend.modelId === 'esmfold' ? 1500 + Math.random() * 3000
-      : backend.modelId === 'af2' ? 4000 + Math.random() * 8000
-      : 6000 + Math.random() * 12000
-    await delay(t)
-
-    const result: PredictResponse = {
-      pdb: '', plddt_mean: 82 + Math.random() * 14, solve_time_ms: t * (backend.siliconId === 'tpu' ? 0.55 : 1),
-      device_kind: backend.siliconId === 'tpu' ? 'TPU v6e' : 'NVIDIA A100', num_devices: backend.siliconId === 'tpu' ? 4 : 1,
-      seq_len: protein.residueCount, model: backend.modelName,
-    }
-
-    clearInterval(costInterval)
-    const done = Date.now()
-    updateLane(backendId, { state: 'done', completedAt: done, elapsedMs: done - now, costAccumulated: ((done - now) / 1000) * backend.pricePerSec, result })
+  const startPolling = useCallback((runId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await pollStatus(runId)
+        for (const [backendId, blob] of Object.entries(status.lanes)) {
+          const update = blobToLaneStatus(blob, backendId as BackendId)
+          updateLane(backendId as BackendId, update)
+        }
+        if (status.all_complete) {
+          if (pollRef.current) clearInterval(pollRef.current)
+          pollRef.current = null
+          setPhase('done')
+          setShowScorecard(true)
+        }
+      } catch (err) {
+        console.error('Poll error:', err)
+      }
+    }, 2000)
   }, [updateLane])
 
+  // On page load: check for in-progress run (refresh resilience)
+  useEffect(() => {
+    getLatestRun().then(latest => {
+      if (latest && !latest.all_complete) {
+        setActiveRunId(latest.run_id)
+        setPhase('running')
+        for (const [backendId, blob] of Object.entries(latest.lanes)) {
+          const update = blobToLaneStatus(blob, backendId as BackendId)
+          updateLane(backendId as BackendId, update)
+        }
+        startPolling(latest.run_id)
+      } else if (latest?.all_complete) {
+        setActiveRunId(latest.run_id)
+        for (const [backendId, blob] of Object.entries(latest.lanes)) {
+          const update = blobToLaneStatus(blob, backendId as BackendId)
+          updateLane(backendId as BackendId, update)
+        }
+        setPhase('done')
+        setShowScorecard(true)
+      }
+    }).catch(() => {})
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
+
   const handleSubmit = useCallback(async () => {
-    // Phase: dispatching → zoom out → running → done
     setPhase('dispatching')
     setShowScorecard(false)
+    setDispatchLines([])
     setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
-    Object.values(costIntervals.current).forEach(clearInterval)
-    costIntervals.current = {}
 
-    // Brief pause to show terminal dispatching, then zoom out
-    await delay(1500)
-    setPhase('running')
+    try {
+      const result = await submitRun(currentProtein.id)
+      setActiveRunId(result.run_id)
+      if (result.dispatch_lines) {
+        setDispatchLines(result.dispatch_lines)
+      }
+      if (result.already_running) {
+        setDispatchLines(['Resuming existing run...'])
+      }
+      await delay(1500)
+      setPhase('running')
+      startPolling(result.run_id)
+    } catch (err) {
+      console.error('Submit failed, falling back to simulation:', err)
+      setDispatchLines([
+        'Submitted af2-tpu → partition=tpu (simulated)',
+        'Submitted af2-gpu → partition=gpu (simulated)',
+        'Submitted esmfold-tpu → partition=tpu (simulated)',
+        'Submitted esmfold-gpu → partition=gpu (simulated)',
+        'Submitted boltz2-tpu → partition=tpu (simulated)',
+        'Submitted boltz2-gpu → partition=gpu (simulated)',
+      ])
+      await delay(1500)
+      setPhase('running')
+      simulateFallback()
+    }
+  }, [currentProtein, startPolling])
 
-    const allModels: ModelId[] = ['af2', 'esmfold', 'boltz2']
-    await Promise.allSettled(BACKENDS.filter(b => allModels.includes(b.modelId)).map(b => simulateLane(b.id, currentProtein)))
+  const simulateFallback = useCallback(async () => {
+    for (const b of BACKENDS) {
+      const now = Date.now()
+      updateLane(b.id, { state: 'queued', startedAt: now })
+      await delay(200 + Math.random() * 300)
+      updateLane(b.id, { state: 'allocating' })
+      await delay(500 + Math.random() * 1500)
+      updateLane(b.id, { state: 'inferring' })
+      const t = b.modelId === 'esmfold' ? 1500 : b.modelId === 'af2' ? 4000 : 6000
+      await delay(t + Math.random() * t)
+      const done = Date.now()
+      updateLane(b.id, {
+        state: 'done', completedAt: done, elapsedMs: done - now,
+        costAccumulated: ((done - now) / 1000) * b.pricePerSec,
+        result: { pdb: '', plddt_mean: 82 + Math.random() * 14, solve_time_ms: done - now, device_kind: b.siliconName, num_devices: 1, seq_len: 142, model: b.modelName },
+      })
+    }
     setPhase('done')
     setShowScorecard(true)
-  }, [simulateLane, currentProtein])
+  }, [updateLane])
 
   // Enter key triggers submit (terminal UX)
   React.useEffect(() => {
@@ -195,15 +238,14 @@ export default function App() {
         {phase === 'home' && (
           <div style={{ marginTop: 6, color: '#708090', fontSize: '1.1vmin' }}>Press Enter to submit</div>
         )}
-        {(phase === 'dispatching' || phase === 'running' || phase === 'done') && (
+        {(phase === 'dispatching' || phase === 'running' || phase === 'done') && dispatchLines.length > 0 && (
           <>
-            <div className="terminal-line" style={{ color: '#eab308', marginTop: 6, animationDelay: '0.1s' }}>Submitted batch job 001 → tpu (us-west1-c)</div>
-            <div className="terminal-line" style={{ color: '#eab308', animationDelay: '0.25s' }}>Submitted batch job 002 → gpu (us-central1-a)</div>
-            <div className="terminal-line" style={{ color: '#eab308', animationDelay: '0.4s' }}>Submitted batch job 003 → tpu (us-east5-b)</div>
-            <div className="terminal-line" style={{ color: '#eab308', animationDelay: '0.55s' }}>Submitted batch job 004 → gpu (us-east4-a)</div>
-            <div className="terminal-line" style={{ color: '#eab308', animationDelay: '0.7s' }}>Submitted batch job 005 → tpu (us-central1-b)</div>
-            <div className="terminal-line" style={{ color: '#eab308', animationDelay: '0.85s' }}>Submitted batch job 006 → gpu (us-east5-a)</div>
-            <div className="terminal-line" style={{ color: '#eab308', marginTop: 4, animationDelay: '1s' }}>squeue: 6 jobs PENDING → Spot allocating...</div>
+            {dispatchLines.map((line, i) => (
+              <div key={i} className="terminal-line" style={{ color: '#eab308', marginTop: i === 0 ? 6 : 0, animationDelay: `${0.1 + i * 0.15}s` }}>{line}</div>
+            ))}
+            <div className="terminal-line" style={{ color: '#eab308', marginTop: 4, animationDelay: `${0.1 + dispatchLines.length * 0.15}s` }}>
+              squeue: {dispatchLines.length} jobs PENDING → Spot allocating...
+            </div>
           </>
         )}
         {(phase === 'running' || phase === 'done') && (
@@ -235,35 +277,34 @@ export default function App() {
         </div>
       )}
 
-      {/* Info button — talk track for the current scene */}
+      {/* Info button — top right, same style as hamburger menu */}
+      <div style={{ position: 'fixed', top: 15, right: 15, zIndex: 25 }}>
       <InfoButton
         title={
-          phase === 'home' ? 'Scene 0 — Biowulf Home' :
-          phase === 'dispatching' ? 'Scene 1 — sbatch dispatched' :
-          phase === 'running' ? 'Scene 2 — Multi-region burst' :
-          'Scene 3 — Results in'
+          phase === 'home' ? 'Biowulf Home' :
+          phase === 'dispatching' ? 'Dispatching' :
+          phase === 'running' ? 'Multi-Region Burst' :
+          'Results'
         }
         sections={
           phase === 'home' ? [
-            { heading: 'WHAT YOU SEE', body: 'NIH Building 12 home base. Real Slurm `sbatch` command typed against an actual Cluster Toolkit controller in wz-nih-demo-controller. Press Enter to dispatch.' },
-            { heading: 'SLIDE 1 — TITLE', body: 'Google Cloud was NIH\'s first commercial cloud partner (STRIDES, July 2018). Alphabet 2026 CapEx: $180–190B, mostly AI infrastructure.\n\nBioTeam counter: their 3-4x AWS finding tested AWS EFA (software-overlay). Google Cloud RDMA uses Falcon — hardware transport in Titanium microcontrollers, bypassing the OS network stack. We\'d welcome a head-to-head on H4D, STRIDES credits cover it.' },
-            { heading: 'SLIDE 13 — LIVE DEMO INTRO', body: '"Steve, Tim — we\'re going to simulate how your Slurm controller on-prem bursts out across different accelerators wherever capacity may be."' },
+            { body: 'The <a href="https://hpc.nih.gov/" target="_blank">Biowulf cluster</a> serves 2,500 researchers across 23 NIH institutes — 105,000 processors, 336 A100 GPUs, and a <a href="https://hpc.nih.gov/apps/" target="_blank">scientific applications catalog</a> that covers everything from GROMACS to AlphaFold. Building 12 is approaching end of life, GPU queue pressure continues to grow, and three new AI staff have joined to keep pace with demand. Today\'s conversation is about how to extend that capacity.\n\nGoogle Cloud was NIH\'s <a href="https://www.hpcwire.com/2018/07/31/google-is-first-partner-in-nihs-strides-effort-to-speed-discovery-in-the-cloud/" target="_blank">first commercial cloud partner</a> under the STRIDES Initiative in 2018. Google designs its own silicon, network transport, and datacenter hardware — attributes that make cloud bursting with Google worth a closer look.\n\nOn screen is a terminal on Building 12 with a real Slurm command: <code>sbatch predict.sh --model=all --target=both --protein=brca1 --requeue --partition=tpu,gpu</code>. This terminal sits inside a controller project simulating Biowulf on-premise, ready to burst compute into a separate cloud project. When we press Enter, six inference jobs will dispatch across both TPU and GPU partitions to whichever CONUS regions have Spot capacity.' },
           ] :
           phase === 'dispatching' || phase === 'running' ? [
-            { heading: 'WHAT YOU SEE', body: 'Same terminal, real sbatch output streaming in. The map zooms out from Bethesda to CONUS. Markers light up at the 11 GCP zones where TPU v6e and A100 Spot capacity surfaces. Six jobs fan out to the regions with available silicon.' },
-            { heading: 'SLIDE 6 — CAPACITY WITHOUT A COMMIT', body: 'DWS Flex Start: guaranteed GPU/TPU capacity up to 7 days/request, no reservation contract. AWS Capacity Blocks need fixed duration + rigid sizing.\n\nCalendar Mode: pick a start date, lock in up to 90 days — for grant-deadline runs.\n\nMulti-region Spot: thousands of chips in pools at any moment. sbatch --requeue resumes from checkpoint.\n\nBoltVMs: H100 cold-start ~2 min vs 5–15 min.\n\nPSSA: fixed-price predictability NIH procurement can approve.' },
-            { heading: 'SLIDE 7 — WHAT A CLOUD NODE CAN BE', body: 'TPU + GPU same GKE cluster (this demo). Image Streaming: 50 GB CUDA container, pod starts while image streams. G4 fractional GPUs (1/8, 1/4, 1/2 RTX PRO 6000) for workloads that don\'t need a whole H100.\n\nWhich Biowulf workloads burst first?\n(1) Embarrassingly parallel NOW: AlphaFold screening, GATK, nf-core. Same sbatch, same containers. 8-GPU/user limit vanishes.\n(2) GPU-hungry training when queue depth > tolerance.\n(3) Tightly-coupled MPI selectively, on H4D + Falcon.' },
-            { heading: 'SLIDE 3 — GOOGLE-ONLY FABRIC', body: 'Titanium microcontrollers — 100% CPU cores go to science. Palomar OCS reroutes around chip failures without restarting the job. Node Health Prediction drains nodes before failure. Multi-tier checkpointing (RAM → peer → GCS). Topology-aware Slurm via Cluster Director — AWS/Azure expose no hierarchy to the scheduler.' },
+            { body: 'The on-prem Slurm controller submitted six jobs to compute nodes in a separate cloud project. The controller didn\'t move — the compute burst out. Slurm\'s <code>--requeue</code> flag means if any Spot node is preempted, the job automatically retries in the next available zone.\n\nThe architecture is one Slurm cluster. The controller sits on-prem — simulated here by a VM in a controller project connected to the burst project via <a href="https://cloud.google.com/vpc/docs/vpc-peering" target="_blank">VPC peering</a>. In production, NIH would use a <a href="https://cloud.google.com/network-connectivity/docs/interconnect/concepts/overview" target="_blank">400G Dedicated Interconnect</a> from Building 12 to Ashburn. Same private IP connectivity, sub-millisecond latency, MACsec encrypted.\n\nCompute nodesets are defined with weight-based priority. TPU partition tries us-west1 first (largest Spot pool), then us-east5, us-central1. GPU tries us-central1 first. The admin configures this once — researchers never see it.\n\nFor storage, <a href="https://cloud.google.com/storage-transfer/docs/overview" target="_blank">Storage Transfer Service</a> runs an agent on GPFS and does scheduled incremental syncs to GCS — only new and changed files transfer. The Slurm prolog stages data from GCS to <a href="https://docs.cloud.google.com/managed-lustre/docs/overview" target="_blank">Managed Lustre</a> as hot scratch at job start; the epilog syncs results back.' },
+            { body: '<b>Workloads suited for cloud bursting from <a href="https://hpc.nih.gov/apps/" target="_blank">Biowulf\'s catalog</a>:</b>\n\n<b>Cryo-EM</b> — AreTomo, MotionCor2, CryoSPARC, RELION. Multi-GPU, queue-bound. Pre-stage to Managed Lustre, run on cloud GPUs.\n\n<b>Molecular Dynamics</b> — GROMACS, NAMD, AMBER. Tightly-coupled MPI, latency-sensitive. For <a href="https://cloud.google.com/blog/products/compute/new-h4d-vms-optimized-for-hpc" target="_blank">H4D</a> with Cloud RDMA.\n\n<b>Protein Design</b> — RFdiffusion, BindCraft, AlphaFold. Embarrassingly parallel. Small inputs, large compute. Burst immediately, no storage dependency.\n\n<b>Biomedical Imaging</b> — nnU-Net, DeepLabCut. GPU-hungry. Datasets stage once to GCS, mount via <a href="https://cloud.google.com/storage/docs/cloud-storage-fuse/overview" target="_blank">Cloud Storage FUSE</a>.\n\n<b>Genomics</b> — SpliceAI, Nextflow/nf-core. <code>gs://</code> URIs define datasources natively. <a href="https://docs.cloud.google.com/batch/docs/nextflow" target="_blank">Cloud Batch</a> manages infrastructure.' },
+            { body: 'DWS Flex Start: guaranteed 7 days, no reservation contract. Calendar Mode: lock in up to 90 days for grant deadlines.\n\nMulti-region Spot: <code>sbatch --requeue</code> resumes from checkpoint. BoltVMs: H100 cold-start ~2 min.\n\nPSSA: Each IC contributes via TAPs — researchers aren\'t charged per job. PSSA maps to that model: fixed annual line item, no per-researcher metering.' },
+            { body: '6 of 7 top Biowulf GPU apps have pre-built containers:\nGROMACS, NAMD, AMBER, RELION — NGC containers\nRFdiffusion — BioNeMo Blueprints on GKE\nnnU-Net — standard PyTorch container\nCryoSPARC — license-bound manual deploy (vendor constraint, not GCP gap)\n\nCryo-EM (AreTomo, MotionCor2), biomedical imaging (DeepLabCut, nnU-Net), genomics (SpliceAI) — all covered.' },
+            { body: 'Titanium: 100% CPU cores to science. Palomar OCS: reroutes around chip failures, no restart. Node Health Prediction: drains nodes before failure. Multi-tier checkpointing: RAM, peer, GCS. Topology-aware Slurm via Cluster Director.' },
           ] : [
-            { heading: 'WHAT YOU SEE', body: 'All 6 backends complete. Identical scientific output across silicon (pLDDT, structure). Side ladder shows $/predict per backend, cheapest wins.' },
-            { heading: 'SLIDE 10 — TPU ECONOMICS ARE STRUCTURAL', body: 'TPU TCO/hr: 30% lower than GB200, 41% lower than GB300 (SemiAnalysis). MFU 40% TPU vs 30% GPU → 52% lower cost per effective petaFLOP. Anthropic\'s 67% Opus price cut was a direct consequence. NVIDIA just paid ~$20B for Groq\'s LPU — Groq uses systolic arrays, what Google pioneered in 2015.' },
-            { heading: 'SLIDE 11 — CALTECH CI-FM PRECEDENT', body: '1B-param graph net for spatial genomics (Michael J. Fox Foundation, Parkinson\'s). PyTorch on B200 → JAX on TPU. Training/inference comparable. Economics flipped: 10,000 drug-screening runs = $53k GPU vs $8.9k TPU.\n\nAlphaFold at Biowulf scale: same 5-6x cost advantage applies. AF attention + scatter/gather are memory-bandwidth-bound — exactly where TPU HBM compounds.' },
-            { heading: 'SLIDE 12 — TORCHTPU', body: 'Most Biowulf researchers write PyTorch. Historically TPU = JAX. Not anymore: TorchTPU, `device=\'tpu\'`. First-class in Ray 2.55.\n\nThis demo proves it: ESMFold-TPU runs the same PyTorch as ESMFold-GPU, one line changed. Identical pLDDT (0.8264 vs 0.8288), identical PDB size (87,198 chars).\n\nPurdue has a 256-chip TPU pod ON-PREM with Slurm. AWS cannot deploy Trainium on-prem.' },
-            { heading: 'SLIDE 16 — SCIENCE GATEWAY', body: 'Researcher picks the science. System picks the silicon. MD stays on Biowulf InfiniBand. AF screening → TPU. Burst GPU fans across 5 regions via DWS Flex. Underneath: GKE 130k nodes + Custom Compute Classes as routing policy engine.' },
-            { heading: 'SLIDE 17 — NEXT STEPS', body: '1. Pick the first burst workload together (with David Hoover + Tim Miller).\n2. HPC benchmark on H4D + Cloud RDMA vs the BioTeam EFA test.\n3. AlphaFold pilot on TPU v5e via STRIDES.\n4. Architecture workshop: multi-region Slurm reference deployment, Terraform blueprints, NIST 800-171 hardening.\n\nZeke follows up with cost model + GPAR details.' },
+            { body: 'All 6 backends complete. Identical scientific output across silicon. Side ladder shows $/predict per backend.' },
+            { body: 'TPU TCO/hr: 30% lower than GB200, 41% lower than GB300 (SemiAnalysis). MFU 40% TPU vs 30% GPU.\n\nAnthropic, OpenAI, Apple, Meta, Midjourney, Recursion Pharma — all chose TPU at scale.\n\nCaltech CI-FM: 10,000 drug-screening runs = $53k GPU vs $8.9k TPU.' },
+            { body: 'ESMFold-TPU: same PyTorch, one line changed. Identical pLDDT, identical PDB size.\n\nPurdue: 256-chip TPU pod ON-PREM with Slurm. AWS cannot deploy Trainium on-prem.' },
+            { body: '1. Pick the first burst workload (with David Hoover + Tim Miller)\n2. HPC benchmark: H4D + Cloud RDMA vs BioTeam\'s EFA test\n3. AlphaFold pilot on TPU v5e via STRIDES\n4. Architecture workshop: multi-region Slurm, Terraform blueprints, NIST 800-171 hardening\n\nZeke follows up with cost model + GPAR details.' },
           ]
         }
       />
+      </div>
 
       {/* Live indicator */}
       {isRunning && (

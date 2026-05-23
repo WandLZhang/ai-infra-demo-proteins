@@ -6,11 +6,13 @@ export type MarkerState = 'idle' | 'active' | 'done'
 interface ZoneMarkerProps {
   position: google.maps.LatLngLiteral
   label: string
+  subtitle?: string
+  subtitleHref?: string
   state: MarkerState
   onClick?: () => void
 }
 
-export default function ZoneMarker({ position, label, state, onClick }: ZoneMarkerProps) {
+export default function ZoneMarker({ position, label, subtitle, subtitleHref, state, onClick }: ZoneMarkerProps) {
   const stateClass = state === 'done' ? 'marker-done' : state === 'active' ? 'marker-active' : ''
 
   return (
@@ -23,6 +25,11 @@ export default function ZoneMarker({ position, label, state, onClick }: ZoneMark
         </div>
         <div className="marker-text-box">
           <b>{label}</b>
+          {subtitle && (
+            subtitleHref
+              ? <a href={subtitleHref} target="_blank" rel="noopener" style={{ display: 'block', fontSize: '0.75em', color: '#708090', textDecoration: 'none', marginTop: 1 }}>{subtitle}</a>
+              : <span style={{ display: 'block', fontSize: '0.75em', color: '#708090', marginTop: 1 }}>{subtitle}</span>
+          )}
         </div>
       </div>
     </OverlayView>
