@@ -40,13 +40,13 @@ interface InfraMapProps {
 }
 
 function getZoneState(zone: ZoneInfo, lanes: Record<BackendId, LaneStatus>): MarkerState {
-  const anyDone = zone.backends.some(bid => lanes[bid]?.state === 'done')
-  const anyActive = zone.backends.some(bid => {
-    const s = lanes[bid]?.state
-    return s && s !== 'idle' && s !== 'done' && s !== 'failed'
-  })
-  if (anyDone) return 'done'
-  if (anyActive) return 'active'
+  const states = zone.backends.map(bid => lanes[bid]?.state).filter(Boolean)
+  const anyRunning = states.some(s => s === 'loading' || s === 'inferring' || s === 'done')
+  const anyFailed = states.some(s => s === 'failed')
+  const anyProvisioning = states.some(s => s === 'queued' || s === 'allocating')
+  if (anyRunning) return 'active'
+  if (anyFailed) return 'failed'
+  if (anyProvisioning) return 'provisioning'
   return 'idle'
 }
 

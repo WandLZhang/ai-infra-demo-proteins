@@ -1,7 +1,7 @@
 import React from 'react'
 import { OverlayView } from '@react-google-maps/api'
 
-export type MarkerState = 'idle' | 'active' | 'done'
+export type MarkerState = 'idle' | 'provisioning' | 'failed' | 'active' | 'done'
 
 interface ZoneMarkerProps {
   position: google.maps.LatLngLiteral
@@ -13,7 +13,7 @@ interface ZoneMarkerProps {
 }
 
 export default function ZoneMarker({ position, label, subtitle, subtitleHref, state, onClick }: ZoneMarkerProps) {
-  const stateClass = state === 'done' ? 'marker-done' : state === 'active' ? 'marker-active' : ''
+  const stateClass = state === 'done' ? 'marker-done' : state === 'active' ? 'marker-active' : state === 'provisioning' ? 'marker-provisioning' : state === 'failed' ? 'marker-failed' : ''
 
   return (
     <OverlayView position={position} mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}>
