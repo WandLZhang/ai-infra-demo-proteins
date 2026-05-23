@@ -19,16 +19,16 @@ export interface ZoneInfo {
 export const BIOWULF_HOME = { lat: 38.9988, lng: -77.1020 }
 
 export const ZONE_LOCATIONS: ZoneInfo[] = [
-  { id: 'us-west1',    lat: 45.6015, lng: -121.1842, label: 'us-west1',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },
+  { id: 'us-west1',    lat: 45.6015, lng: -121.1842, label: 'us-west1',    backends: [] },
   { id: 'us-west2',    lat: 34.0537, lng: -118.2428, label: 'us-west2',    backends: [] },
   { id: 'us-west3',    lat: 40.7596, lng: -111.8868, label: 'us-west3',    backends: [] },
   { id: 'us-west4',    lat: 36.1674, lng: -115.1484, label: 'us-west4',    backends: [] },
   { id: 'us-west8',    lat: 33.4484, lng: -112.0741, label: 'us-west8',    backends: [] },
-  { id: 'us-central1', lat: 41.2588, lng:  -95.8519, label: 'us-central1', backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
-  { id: 'us-south1',   lat: 32.7763, lng:  -96.7969, label: 'us-south1',   backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },
-  { id: 'us-east1',    lat: 33.1960, lng:  -80.0131, label: 'us-east1',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },
-  { id: 'us-east4',    lat: 39.0298, lng:  -77.4744, label: 'us-east4',    backends: ['af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
-  { id: 'us-east5',    lat: 39.9623, lng:  -83.0007, label: 'us-east5',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
+  { id: 'us-central1', lat: 41.2588, lng:  -95.8519, label: 'us-central1', backends: ['af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
+  { id: 'us-south1',   lat: 32.7763, lng:  -96.7969, label: 'us-south1',   backends: [] },
+  { id: 'us-east1',    lat: 33.1960, lng:  -80.0131, label: 'us-east1',    backends: [] },
+  { id: 'us-east4',    lat: 39.0298, lng:  -77.4744, label: 'us-east4',    backends: [] },
+  { id: 'us-east5',    lat: 39.9623, lng:  -83.0007, label: 'us-east5',    backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] },
   { id: 'us-east7',    lat: 35.2272, lng:  -80.8431, label: 'us-east7',    backends: [] },
 ]
 
