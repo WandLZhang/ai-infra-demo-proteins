@@ -68,17 +68,19 @@ ssh_cmd "
 "
 
 echo "[6/7] Granting cross-project permissions..."
-CTRL_SA=\$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email 2>/dev/null || echo "")
-# These are idempotent — safe to re-run
-gcloud projects add-iam-policy-binding "$BURST_PROJECT_ID" \
-  --member="serviceAccount:${CONTROLLER_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/tpu.admin" --condition=None --quiet 2>/dev/null || true
-gcloud projects add-iam-policy-binding "$BURST_PROJECT_ID" \
-  --member="serviceAccount:${CONTROLLER_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/compute.instanceAdmin.v1" --condition=None --quiet 2>/dev/null || true
-gcloud projects add-iam-policy-binding "$BURST_PROJECT_ID" \
-  --member="serviceAccount:${CONTROLLER_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/storage.objectAdmin" --condition=None --quiet 2>/dev/null || true
+CTRL_SA="${CONTROLLER_PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+BURST_SA="${BURST_PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+# Project-level roles (idempotent)
+for ROLE in roles/tpu.admin roles/compute.instanceAdmin.v1 roles/storage.objectAdmin; do
+  gcloud projects add-iam-policy-binding "$BURST_PROJECT_ID" \
+    --member="serviceAccount:$CTRL_SA" --role="$ROLE" --condition=None --quiet 2>/dev/null || true
+done
+# Controller SA needs serviceAccountUser on burst SA to create TPU VMs
+# (TPU API requires it when specifying the VM's service account)
+gcloud iam service-accounts add-iam-policy-binding "$BURST_SA" \
+  --project="$BURST_PROJECT_ID" \
+  --member="serviceAccount:$CTRL_SA" \
+  --role="roles/iam.serviceAccountUser" --quiet 2>/dev/null || true
 
 echo "[7/7] Installing trigger watcher as systemd service..."
 ssh_cmd "
