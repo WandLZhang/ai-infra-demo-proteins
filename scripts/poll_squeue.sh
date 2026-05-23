@@ -20,19 +20,15 @@ echo "[]" > "$EVENTS_FILE"
 
 declare -A CACHED_STATE
 
+LOG_DIR="$SHARED_BUCKET/jobs/$RUN_ID/log"
+
 add_event() {
   local MSG="$1"
   local TS
   TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  python3 -c "
-import json, sys
-with open('$EVENTS_FILE') as f:
-    events = json.load(f)
-events.append({'ts': '$TS', 'msg': sys.argv[1]})
-with open('$EVENTS_FILE', 'w') as f:
-    json.dump(events, f)
-" "$MSG"
-  gsutil -q cp "$EVENTS_FILE" "$EVENTS_PATH" 2>/dev/null || true
+  local SEQ
+  SEQ="$(date +%s%N)"
+  echo "{\"ts\":\"$TS\",\"msg\":\"$MSG\"}" | gsutil -q cp - "$LOG_DIR/${SEQ}-slurmctld.json" 2>/dev/null || true
   echo "[poll] $TS $MSG"
 }
 
@@ -100,14 +96,20 @@ scan_log() {
       local NODE REGION
       NODE=$(echo "$line" | grep -o 'node [^ ]*' | head -1 | awk '{print $2}') || true
       REGION=$(echo "$NODE" | sed 's/nihprotein-//' | sed 's/-[0-9]*$//') || true
-      add_event "No Spot capacity: $REGION"
-    elif echo "$line" | grep -q "sched.*Allocate.*$RUN_ID"; then
+      add_event "resume: no Spot capacity in $REGION → requeue"
+    elif echo "$line" | grep -q "sched.*Allocate"; then
       local NODE PART
       NODE=$(echo "$line" | grep -o 'NodeList=[^ ]*' | head -1 | cut -d= -f2) || true
       PART=$(echo "$line" | grep -o 'Partition=[^ ]*' | head -1 | cut -d= -f2) || true
-      add_event "Allocated $NODE ($PART)"
-    elif echo "$line" | grep -q "requeue.*$RUN_ID"; then
-      add_event "Job requeued → next zone"
+      add_event "sched: allocate → $NODE ($PART)"
+    elif echo "$line" | grep -q "requeue job"; then
+      local JOBID
+      JOBID=$(echo "$line" | grep -o 'JobId=[0-9]*' | head -1) || true
+      add_event "requeue $JOBID → trying next zone"
+    elif echo "$line" | grep -q "now responding"; then
+      local NODE
+      NODE=$(echo "$line" | grep -o 'Node [^ ]*' | head -1 | awk '{print $2}') || true
+      add_event "slurmd: $NODE registered"
     fi
   done <<< "$CONTENT"
 }

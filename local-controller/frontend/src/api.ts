@@ -82,13 +82,23 @@ export interface SlurmEvent {
 }
 
 export async function pollEvents(runId: string): Promise<SlurmEvent[]> {
-  const resp = await fetch(`${GCS_BASE}/jobs/${runId}/log.jsonl?t=${Date.now()}`, { cache: 'no-store' })
-  if (!resp.ok) return []
-  const text = await resp.text()
-  return text.trim().split('\n').filter(Boolean).map(line => {
-    try { return JSON.parse(line) }
-    catch { return null }
-  }).filter(Boolean) as SlurmEvent[]
+  const listResp = await fetch(
+    `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o?prefix=jobs/${runId}/log/&delimiter=/&t=${Date.now()}`,
+    { cache: 'no-store' }
+  )
+  if (!listResp.ok) return []
+  const listData = await listResp.json()
+  const items: { name: string }[] = listData.items || []
+  items.sort((a, b) => a.name.localeCompare(b.name))
+
+  const events: SlurmEvent[] = await Promise.all(
+    items.map(async (item) => {
+      const data = await fetchGcsJson(item.name)
+      return data as SlurmEvent | null
+    })
+  ).then(results => results.filter(Boolean) as SlurmEvent[])
+
+  return events
 }
 
 export async function getLatestRun(): Promise<RunStatus | null> {

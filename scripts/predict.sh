@@ -93,11 +93,9 @@ EOF
       --error="/dev/null" \
       --wrap="$JOB_CMD" 2>&1)
     echo "Submitted $BACKEND → partition=$PARTITION, job=$SLURM_JOB_ID"
-    # Log to GCS for frontend terminal
     TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    LOG_PATH="$SHARED_BUCKET/$JOBS_PREFIX/log.jsonl"
-    EXISTING=$(gsutil cat "$LOG_PATH" 2>/dev/null || echo "")
-    echo -e "${EXISTING}\n{\"ts\":\"$TS\",\"msg\":\"sbatch $BACKEND → $PARTITION (job $SLURM_JOB_ID)\"}" | gsutil -q cp - "$LOG_PATH" 2>/dev/null || true
+    SEQ="$(date +%s%N)"
+    echo "{\"ts\":\"$TS\",\"msg\":\"sbatch $BACKEND → $PARTITION (job $SLURM_JOB_ID)\"}" | gsutil -q cp - "$SHARED_BUCKET/$JOBS_PREFIX/log/${SEQ}-dispatch.json" 2>/dev/null || true
   else
     echo "Submitted $BACKEND → direct (no Slurm)"
     bash "$SCRIPT_DIR/run_backend.sh" "$BACKEND" "$RUN_ID" "$PROTEIN_ID" &
