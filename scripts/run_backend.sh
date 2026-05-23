@@ -36,7 +36,20 @@ else
   PRICE_PER_SEC="$GPU_A100_PRICE_PER_SEC"
 fi
 
+LOG_PATH="$SHARED_BUCKET/jobs/$RUN_ID/log.jsonl"
 START_TIME=$(date +%s)
+
+log_event() {
+  local MSG="$1"
+  local TS
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "{\"ts\":\"$TS\",\"msg\":\"$MSG\"}" | gsutil -q cp -a public-read - "$LOG_PATH" 2>/dev/null || true
+  # Append to log — read existing, append, write back
+  local EXISTING
+  EXISTING=$(gsutil cat "$LOG_PATH" 2>/dev/null || echo "")
+  echo -e "${EXISTING}\n{\"ts\":\"$TS\",\"msg\":\"$MSG\"}" | gsutil -q cp - "$LOG_PATH" 2>/dev/null || true
+  echo "[$BACKEND_ID] $MSG"
+}
 
 update_state() {
   local STATE="$1"
@@ -83,12 +96,16 @@ echo ">A|protein" > "$FASTA_PATH"
 echo "$SEQUENCE" >> "$FASTA_PATH"
 
 # ── Phase 1: Allocating ─────────────────────────────────────────────
+log_event "[$BACKEND_ID] allocating on $(hostname) ($SILICON)"
 update_state "allocating"
 
 # ── Phase 2: Loading model ───────────────────────────────────────────
+log_event "[$BACKEND_ID] loading model weights"
 update_state "loading"
+sleep 1
 
 # ── Phase 3: Inferring ───────────────────────────────────────────────
+log_event "[$BACKEND_ID] inferring $PROTEIN_ID (${#SEQUENCE}aa)"
 update_state "inferring"
 
 # Run the actual predict script based on backend type
@@ -140,5 +157,4 @@ COST=$(printf "%.10f" "$(echo "$ELAPSED_MS * $PRICE_PER_SEC / 1000" | bc -l 2>/d
 RESULT_JSON="{\"output_gcs_path\":\"$GCS_OUTPUT_PATH\",\"output_chars\":$OUTPUT_CHARS,\"solve_time_ms\":$ELAPSED_MS,\"model\":\"$MODEL\",\"silicon\":\"$SILICON\",\"seq_len\":${#SEQUENCE}}"
 
 update_state "done" "$RESULT_JSON"
-
-echo "[${BACKEND_ID}] DONE — ${ELAPSED_MS}ms, ${OUTPUT_CHARS} chars, \$$COST"
+log_event "[$BACKEND_ID] done — ${ELAPSED_MS}ms \$$COST"
