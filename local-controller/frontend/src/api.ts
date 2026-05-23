@@ -50,7 +50,7 @@ const ALL_BACKENDS: BackendId[] = [
 ]
 
 async function fetchGcsJson(path: string): Promise<any | null> {
-  const resp = await fetch(`${GCS_BASE}/${path}`, { cache: 'no-store' })
+  const resp = await fetch(`${GCS_BASE}/${path}?t=${Date.now()}`, { cache: 'no-store' })
   if (!resp.ok) return null
   return resp.json()
 }
