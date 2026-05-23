@@ -65,7 +65,12 @@ export default function App() {
     dripRef.current = setInterval(() => {
       if (lineQueue.current.length > 0) {
         const next = lineQueue.current.shift()!
-        setDispatchLines(prev => [...prev, next])
+        if (typeof next === 'object' && (next as any).__laneUpdate) {
+          const { backendId, update } = next as any
+          updateLane(backendId as BackendId, update)
+        } else {
+          setDispatchLines(prev => [...prev, next as string])
+        }
       }
     }, 800)
     pollRef.current = setInterval(async () => {
@@ -75,9 +80,15 @@ export default function App() {
           pollEvents(runId),
         ])
 
+        // Queue lane updates to drip alongside log lines
         for (const [backendId, blob] of Object.entries(status.lanes)) {
-          const update = blobToLaneStatus(blob, backendId as BackendId)
-          updateLane(backendId as BackendId, update)
+          const newState = blob.state || 'idle'
+          const oldState = prevStates.current[backendId]
+          if (newState !== oldState && newState !== 'idle') {
+            const update = blobToLaneStatus(blob, backendId as BackendId)
+            lineQueue.current.push({ __laneUpdate: true, backendId, update } as any)
+          }
+          prevStates.current[backendId] = newState
         }
 
         if (events.length > lastEventCount.current) {
@@ -90,7 +101,7 @@ export default function App() {
           lastEventCount.current = events.length
         }
 
-        if (status.all_complete) {
+        if (status.all_complete && lineQueue.current.length === 0) {
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = null
           setPhase('done')
@@ -216,7 +227,7 @@ export default function App() {
         zIndex: 20,
         background: '#000', border: '1px solid #d3d3d3', padding: 12,
         fontFamily: "'Courier New', Courier, monospace", fontSize: '1.5vmin',
-        color: '#d3d3d3', maxWidth: '30vw', maxHeight: '45vh', overflowY: 'auto' as const,
+        color: '#d3d3d3', width: '30vw', height: '25vh', overflowY: 'auto' as const,
         whiteSpace: 'pre-wrap' as const, cursor: 'default',
       }}>
         <div style={{ color: '#708090', fontSize: '1.2vmin' }}>Last login: {new Date().toLocaleString()} on tty1</div>
@@ -233,26 +244,6 @@ export default function App() {
             ))}
           </>
         )}
-        {(phase === 'running' || phase === 'done') && (() => {
-          const laneVals = Object.values(lanes)
-          const done = laneVals.filter(l => l.state === 'done').length
-          const failed = laneVals.filter(l => l.state === 'failed').length
-          const allocating = laneVals.filter(l => l.state === 'allocating').length
-          const inferring = laneVals.filter(l => l.state === 'inferring').length
-          const queued = laneVals.filter(l => l.state === 'queued').length
-          const parts: string[] = []
-          if (allocating > 0) parts.push(`${allocating} CONFIGURING`)
-          if (inferring > 0) parts.push(`${inferring} RUNNING`)
-          if (queued > 0) parts.push(`${queued} PENDING`)
-          if (done > 0) parts.push(`${done} COMPLETED`)
-          if (failed > 0) parts.push(`${failed} FAILED`)
-          const summary = parts.length > 0 ? parts.join(', ') : 'waiting...'
-          return (
-            <div className="terminal-line" style={{ color: phase === 'done' ? '#09d3ac' : '#eab308', marginTop: 4 }}>
-              squeue: {summary}
-            </div>
-          )
-        })()}
         {phase === 'done' && <div className="terminal-line" style={{ color: '#09d3ac' }}>researcher@biowulf-bld12:~$ ▌</div>}
       </div>
 
