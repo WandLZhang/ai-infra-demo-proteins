@@ -13,7 +13,7 @@
 # The script is idempotent: if a run is already in progress (checked via
 # GCS), it prints the existing run_id instead of resubmitting.
 
-set -euo pipefail
+set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
@@ -41,12 +41,6 @@ echo "Protein:  $PROTEIN_ID (${#SEQUENCE} aa)"
 echo "Backends: ${BACKENDS[*]}"
 echo "Bucket:   $SHARED_BUCKET/$JOBS_PREFIX/"
 echo ""
-
-# Clean slate: cancel any existing jobs from previous runs, reset downed nodes
-if command -v scancel &>/dev/null; then
-  scancel --user="$(whoami)" --quiet 2>/dev/null || true
-  scontrol update NodeName=ALL State=IDLE 2>/dev/null || true
-fi
 
 # Write the run manifest (so frontend can discover this run)
 cat <<EOF | gsutil -q cp - "$SHARED_BUCKET/$JOBS_PREFIX/manifest.json"
