@@ -38,6 +38,15 @@ RUN python3 -m venv /slurm/python/venv \
        google-cloud-tpu google-api-python-client \
        pyyaml addict requests more-executors
 
+# Prolog: stage job scripts from GCS before each job
+RUN mkdir -p /slurm/custom_scripts/prolog.d && \
+    echo '#!/bin/bash\nmkdir -p /tmp/protein-demo\ngsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh /tmp/protein-demo/ 2>/dev/null || true\ngsutil -q cp gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null || true\nchmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null || true' \
+    > /slurm/custom_scripts/prolog.d/stage_scripts.sh && \
+    chmod +x /slurm/custom_scripts/prolog.d/stage_scripts.sh
+
+# nsswitch: resolve UIDs via slurmctld (no need to create users manually)
+RUN echo "passwd: files sss slurm\ngroup: files sss slurm" > /etc/nsswitch.conf || true
+
 # systemd units
 COPY slurmd.service sackd.service slurmcmd.timer slurmcmd.service /etc/systemd/system/
 RUN systemctl enable slurmd sackd slurmcmd.timer
