@@ -28,7 +28,10 @@ CORS(app)
 
 BUCKET_NAME = os.environ.get("STATE_BUCKET", "wz-nih-demo-shared")
 JOBS_PREFIX = "jobs/"
-PREDICT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "predict.sh")
+PREDICT_SCRIPT = "/opt/protein-demo/predict.sh"
+CONTROLLER_VM = os.environ.get("CONTROLLER_VM", "biowulf-controller")
+CONTROLLER_ZONE = os.environ.get("CONTROLLER_ZONE", "us-east5-a")
+CONTROLLER_PROJECT = os.environ.get("CONTROLLER_PROJECT", "wz-nih-demo-controller")
 
 ALL_BACKENDS = [
     "af2-tpu", "af2-gpu",
@@ -67,10 +70,16 @@ def submit():
     if latest and latest.get("all_complete"):
         _delete_run(latest["run_id"])
 
-    # Trigger predict.sh
+    # Trigger predict.sh on the controller VM via SSH
     result = subprocess.run(
-        ["bash", PREDICT_SCRIPT, protein_id],
-        capture_output=True, text=True, timeout=30,
+        [
+            "gcloud", "compute", "ssh", CONTROLLER_VM,
+            f"--zone={CONTROLLER_ZONE}",
+            f"--project={CONTROLLER_PROJECT}",
+            "--tunnel-through-iap",
+            f"--command=bash {PREDICT_SCRIPT} {protein_id}",
+        ],
+        capture_output=True, text=True, timeout=60,
     )
 
     lines = result.stdout.strip().split("\n")
@@ -230,5 +239,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     print(f"State server starting on port {port}")
     print(f"Bucket: {BUCKET_NAME}")
+    print(f"Controller VM: {CONTROLLER_VM} ({CONTROLLER_ZONE}, {CONTROLLER_PROJECT})")
     print(f"Predict script: {PREDICT_SCRIPT}")
     app.run(host="0.0.0.0", port=port, debug=True)
