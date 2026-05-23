@@ -1,0 +1,3 @@
+# Don't ignore anything - Cloud Build needs all files
+!Dockerfile
+!slurm-25.05-bin.tar.gz
