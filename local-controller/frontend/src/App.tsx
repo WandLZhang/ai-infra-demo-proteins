@@ -112,41 +112,11 @@ export default function App() {
       setPhase('running')
       startPolling(result.run_id)
     } catch (err) {
-      console.error('Submit failed, falling back to simulation:', err)
-      setDispatchLines([
-        'Submitted af2-tpu → partition=tpu (simulated)',
-        'Submitted af2-gpu → partition=gpu (simulated)',
-        'Submitted esmfold-tpu → partition=tpu (simulated)',
-        'Submitted esmfold-gpu → partition=gpu (simulated)',
-        'Submitted boltz2-tpu → partition=tpu (simulated)',
-        'Submitted boltz2-gpu → partition=gpu (simulated)',
-      ])
-      await delay(1500)
-      setPhase('running')
-      simulateFallback()
+      console.error('Submit failed:', err)
+      setDispatchLines([`Error: state server unreachable (${err})`])
+      setPhase('home')
     }
   }, [currentProtein, startPolling])
-
-  const simulateFallback = useCallback(async () => {
-    for (const b of BACKENDS) {
-      const now = Date.now()
-      updateLane(b.id, { state: 'queued', startedAt: now })
-      await delay(200 + Math.random() * 300)
-      updateLane(b.id, { state: 'allocating' })
-      await delay(500 + Math.random() * 1500)
-      updateLane(b.id, { state: 'inferring' })
-      const t = b.modelId === 'esmfold' ? 1500 : b.modelId === 'af2' ? 4000 : 6000
-      await delay(t + Math.random() * t)
-      const done = Date.now()
-      updateLane(b.id, {
-        state: 'done', completedAt: done, elapsedMs: done - now,
-        costAccumulated: ((done - now) / 1000) * b.pricePerSec,
-        result: { pdb: '', plddt_mean: 82 + Math.random() * 14, solve_time_ms: done - now, device_kind: b.siliconName, num_devices: 1, seq_len: 142, model: b.modelName },
-      })
-    }
-    setPhase('done')
-    setShowScorecard(true)
-  }, [updateLane])
 
   // Enter key triggers submit (terminal UX)
   React.useEffect(() => {
