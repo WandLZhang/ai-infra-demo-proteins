@@ -5,7 +5,7 @@
 # Usage: bash scripts/watch_triggers.sh
 # (Run via nohup or systemd on the controller VM)
 
-set -euo pipefail
+set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 

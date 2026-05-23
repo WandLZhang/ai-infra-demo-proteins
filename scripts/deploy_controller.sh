@@ -80,28 +80,39 @@ gcloud projects add-iam-policy-binding "$BURST_PROJECT_ID" \
   --member="serviceAccount:${CONTROLLER_PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/storage.objectAdmin" --condition=None --quiet 2>/dev/null || true
 
-echo "[7/7] Starting trigger watcher..."
+echo "[7/7] Installing trigger watcher as systemd service..."
 ssh_cmd "
-  cat > $DEPLOY_DIR/start_watcher.sh << 'SCRIPT'
-#!/bin/bash
-pkill -f watch_triggers 2>/dev/null
-pkill -f poll_squeue 2>/dev/null
-sleep 1
-nohup bash /opt/protein-demo/watch_triggers.sh > /tmp/watch_triggers.log 2>&1 &
-echo \$!
-SCRIPT
-  chmod +x $DEPLOY_DIR/start_watcher.sh
-  bash $DEPLOY_DIR/start_watcher.sh
+  sudo tee /etc/systemd/system/trigger-watcher.service > /dev/null << 'UNIT'
+[Unit]
+Description=GCS Trigger Watcher for Protein Demo
+After=network-online.target slurmctld.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /opt/protein-demo/watch_triggers.sh
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/trigger-watcher.log
+StandardError=append:/var/log/trigger-watcher.log
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable trigger-watcher
+  sudo systemctl restart trigger-watcher
 "
 
 sleep 3
 echo ""
 echo "=== Verifying ==="
-ssh_cmd "tail -3 /tmp/watch_triggers.log"
+ssh_cmd "sudo systemctl is-active trigger-watcher"
+ssh_cmd "sudo tail -3 /var/log/trigger-watcher.log"
 ssh_cmd "sinfo"
 
 echo ""
 echo "=== Deploy complete ==="
-echo "Trigger watcher running on $VM"
+echo "Trigger watcher: systemd service (auto-restarts, survives reboot)"
 echo "Slurm timeouts: ResumeTimeout=180s, SuspendTime=120s, SuspendTimeout=60s"
-echo "Logs: gcloud compute ssh $VM --zone=$ZONE --project=$PROJECT --tunnel-through-iap --command='tail -f /tmp/watch_triggers.log'"
+echo "Logs: gcloud compute ssh $VM --zone=$ZONE --project=$PROJECT --tunnel-through-iap --command='sudo tail -f /var/log/trigger-watcher.log'"
