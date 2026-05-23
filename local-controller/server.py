@@ -100,8 +100,11 @@ def status(run_id):
     for backend_id in ALL_BACKENDS:
         blob = bucket.blob(f"{prefix}{backend_id}.json")
         if blob.exists():
-            content = json.loads(blob.download_as_text())
-            lanes[backend_id] = content
+            try:
+                content = json.loads(blob.download_as_text())
+                lanes[backend_id] = content
+            except json.JSONDecodeError:
+                lanes[backend_id] = {"backend_id": backend_id, "run_id": run_id, "state": "idle"}
         else:
             lanes[backend_id] = {
                 "backend_id": backend_id,
@@ -208,7 +211,10 @@ def _find_latest_run():
     for backend_id in ALL_BACKENDS:
         blob = bucket.blob(f"{prefix}{backend_id}.json")
         if blob.exists():
-            lanes[backend_id] = json.loads(blob.download_as_text())
+            try:
+                lanes[backend_id] = json.loads(blob.download_as_text())
+            except json.JSONDecodeError:
+                lanes[backend_id] = {"backend_id": backend_id, "state": "idle"}
         else:
             lanes[backend_id] = {"backend_id": backend_id, "state": "idle"}
 
