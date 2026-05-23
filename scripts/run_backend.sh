@@ -36,18 +36,16 @@ else
   PRICE_PER_SEC="$GPU_A100_PRICE_PER_SEC"
 fi
 
-LOG_PATH="$SHARED_BUCKET/jobs/$RUN_ID/log.jsonl"
+LOG_DIR="$SHARED_BUCKET/jobs/$RUN_ID/log"
 START_TIME=$(date +%s)
 
 log_event() {
   local MSG="$1"
   local TS
   TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "{\"ts\":\"$TS\",\"msg\":\"$MSG\"}" | gsutil -q cp -a public-read - "$LOG_PATH" 2>/dev/null || true
-  # Append to log — read existing, append, write back
-  local EXISTING
-  EXISTING=$(gsutil cat "$LOG_PATH" 2>/dev/null || echo "")
-  echo -e "${EXISTING}\n{\"ts\":\"$TS\",\"msg\":\"$MSG\"}" | gsutil -q cp - "$LOG_PATH" 2>/dev/null || true
+  local SEQ
+  SEQ="$(date +%s%N)"
+  echo "{\"ts\":\"$TS\",\"msg\":\"$MSG\"}" | gsutil -q cp - "$LOG_DIR/${SEQ}-${BACKEND_ID}.json" 2>/dev/null || true
   echo "[$BACKEND_ID] $MSG"
 }
 
