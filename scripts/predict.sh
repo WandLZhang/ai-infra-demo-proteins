@@ -42,6 +42,15 @@ echo "Backends: ${BACKENDS[*]}"
 echo "Bucket:   $SHARED_BUCKET/$JOBS_PREFIX/"
 echo ""
 
+# Reset Spot nodes so Slurm tries them each run (shows failover in demo)
+if command -v scontrol &>/dev/null; then
+  for NODE in nihprotein-tpuv6eeast5b-0 nihprotein-tpuv6eeast5b-1 \
+              nihprotein-tpuv6ecentral1-0 nihprotein-tpuv6ewest1c-0 \
+              nihprotein-a100spoteast5-0 nihprotein-a100spoteast5-1; do
+    scontrol update NodeName=$NODE State=IDLE 2>/dev/null || true
+  done
+fi
+
 # Write the run manifest (so frontend can discover this run)
 cat <<EOF | gsutil -q cp - "$SHARED_BUCKET/$JOBS_PREFIX/manifest.json"
 {
