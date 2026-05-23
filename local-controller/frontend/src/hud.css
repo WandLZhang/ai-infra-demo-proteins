@@ -61,10 +61,20 @@
 .rotatingBoxes2 { animation: rotatingBoxesAnim2 2.25s ease infinite; border: 1px solid lightgrey; position: absolute; inset: 0; }
 .rotatingBoxes3 { animation: rotatingBoxesAnim3 2s ease infinite; border: 1px solid darkgrey; position: absolute; inset: 0; }
 
-.marker-active .marker-text-box { border-color: #eab308; color: #eab308; }
-.marker-active .rotatingBoxes1 { border-color: #eab308; }
-.marker-active .rotatingBoxes2 { border-color: #facc15; }
-.marker-active .rotatingBoxes3 { border-color: #fde047; }
+.marker-provisioning .marker-text-box { border-color: #eab308; color: #eab308; }
+.marker-provisioning .rotatingBoxes1 { border-color: #eab308; }
+.marker-provisioning .rotatingBoxes2 { border-color: #facc15; }
+.marker-provisioning .rotatingBoxes3 { border-color: #fde047; }
+
+.marker-failed .marker-text-box { border-color: #ef4444; color: #ef4444; }
+.marker-failed .rotatingBoxes1 { border-color: #ef4444; }
+.marker-failed .rotatingBoxes2 { border-color: #f87171; }
+.marker-failed .rotatingBoxes3 { border-color: #fca5a5; }
+
+.marker-active .marker-text-box { border-color: #09d3ac; color: #09d3ac; }
+.marker-active .rotatingBoxes1 { border-color: #09d3ac; }
+.marker-active .rotatingBoxes2 { border-color: #10b981; }
+.marker-active .rotatingBoxes3 { border-color: #34d399; }
 
 .marker-done .marker-text-box { border-color: #09d3ac; color: #09d3ac; }
 .marker-done .rotatingBoxes1 { border-color: #09d3ac; }
