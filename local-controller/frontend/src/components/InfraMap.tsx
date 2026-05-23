@@ -142,7 +142,15 @@ export default function InfraMap({ lanes, onZoneClick, center, zoom }: InfraMapP
 
   const markers = (
     <>
-      <ZoneMarker key="biowulf-home" position={BIOWULF_HOME} label="BIOWULF" state="done" onClick={() => {}} />
+      <ZoneMarker
+        key="biowulf-home"
+        position={BIOWULF_HOME}
+        label="BIOWULF"
+        subtitle="biowulf-controller"
+        subtitleHref="https://console.cloud.google.com/compute/instancesDetail/zones/us-east5-a/instances/biowulf-controller?project=wz-nih-demo-controller"
+        state="done"
+        onClick={() => {}}
+      />
       {ZONE_LOCATIONS.map(zone => (
         <ZoneMarker
           key={zone.id}
