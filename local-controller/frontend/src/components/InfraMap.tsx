@@ -34,20 +34,10 @@ export const ZONE_LOCATIONS: ZoneInfo[] = [
 
 interface InfraMapProps {
   lanes: Record<BackendId, LaneStatus>
+  zoneStates: Record<string, MarkerState>
   onZoneClick: (zone: ZoneInfo) => void
   center: google.maps.LatLngLiteral
   zoom: number
-}
-
-function getZoneState(zone: ZoneInfo, lanes: Record<BackendId, LaneStatus>): MarkerState {
-  const states = zone.backends.map(bid => lanes[bid]?.state).filter(Boolean)
-  const anyRunning = states.some(s => s === 'loading' || s === 'inferring' || s === 'done')
-  const anyFailed = states.some(s => s === 'failed')
-  const anyProvisioning = states.some(s => s === 'queued' || s === 'allocating')
-  if (anyRunning) return 'active'
-  if (anyFailed) return 'failed'
-  if (anyProvisioning) return 'provisioning'
-  return 'idle'
 }
 
 const mapOptions: google.maps.MapOptions = {
@@ -60,7 +50,7 @@ const mapOptions: google.maps.MapOptions = {
   backgroundColor: '#171717',
 }
 
-export default function InfraMap({ lanes, onZoneClick, center, zoom }: InfraMapProps) {
+export default function InfraMap({ lanes, zoneStates, onZoneClick, center, zoom }: InfraMapProps) {
   const { isLoaded } = useJsApiLoader({ googleMapsApiKey: MAPS_API_KEY })
 
   // Two map instances stacked, cross-fade between them.
@@ -156,7 +146,7 @@ export default function InfraMap({ lanes, onZoneClick, center, zoom }: InfraMapP
           key={zone.id}
           position={{ lat: zone.lat, lng: zone.lng }}
           label={zone.label}
-          state={getZoneState(zone, lanes)}
+          state={zoneStates[zone.id] || 'idle'}
           onClick={() => onZoneClick(zone)}
         />
       ))}
