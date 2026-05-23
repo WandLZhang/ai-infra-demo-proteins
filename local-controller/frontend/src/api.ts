@@ -82,8 +82,13 @@ export interface SlurmEvent {
 }
 
 export async function pollEvents(runId: string): Promise<SlurmEvent[]> {
-  const data = await fetchGcsJson(`jobs/${runId}/events.json`)
-  return data || []
+  const resp = await fetch(`${GCS_BASE}/jobs/${runId}/log.jsonl?t=${Date.now()}`, { cache: 'no-store' })
+  if (!resp.ok) return []
+  const text = await resp.text()
+  return text.trim().split('\n').filter(Boolean).map(line => {
+    try { return JSON.parse(line) }
+    catch { return null }
+  }).filter(Boolean) as SlurmEvent[]
 }
 
 export async function getLatestRun(): Promise<RunStatus | null> {

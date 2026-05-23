@@ -39,6 +39,8 @@ export default function App() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [dispatchLines, setDispatchLines] = useState<string[]>([])
   const [infoOpen, setInfoOpen] = useState(false)
+  const lineQueue = useRef<string[]>([])
+  const dripRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
@@ -50,29 +52,44 @@ export default function App() {
   }, [])
 
   const lastEventCount = useRef(0)
+  const prevStates = useRef<Record<string, string>>({})
+  const terminalRef = useRef<HTMLDivElement>(null)
 
   const startPolling = useCallback((runId: string) => {
     if (pollRef.current) clearInterval(pollRef.current)
+    if (dripRef.current) clearInterval(dripRef.current)
     lastEventCount.current = 0
+    prevStates.current = {}
+    lineQueue.current = []
+
+    dripRef.current = setInterval(() => {
+      if (lineQueue.current.length > 0) {
+        const next = lineQueue.current.shift()!
+        setDispatchLines(prev => [...prev, next])
+      }
+    }, 800)
     pollRef.current = setInterval(async () => {
       try {
         const [status, events] = await Promise.all([
           pollStatus(runId),
           pollEvents(runId),
         ])
+
         for (const [backendId, blob] of Object.entries(status.lanes)) {
           const update = blobToLaneStatus(blob, backendId as BackendId)
           updateLane(backendId as BackendId, update)
         }
+
         if (events.length > lastEventCount.current) {
           const newMsgs = events.slice(lastEventCount.current)
             .map(e => e.msg)
             .filter(m => !m.startsWith('squeue poller'))
           if (newMsgs.length > 0) {
-            setDispatchLines(prev => [...prev, ...newMsgs])
+            lineQueue.current.push(...newMsgs)
           }
           lastEventCount.current = events.length
         }
+
         if (status.all_complete) {
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = null
@@ -86,8 +103,17 @@ export default function App() {
   }, [updateLane])
 
   useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (dripRef.current) clearInterval(dripRef.current)
+    }
   }, [])
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight
+    }
+  }, [dispatchLines])
 
   const handleSubmit = useCallback(async () => {
     setPhase('dispatching')
@@ -181,8 +207,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* Terminal — top edge anchored, grows downward as new lines append (real terminal) */}
-      <div style={{
+      {/* Terminal — top edge anchored, auto-scrolls to bottom as new lines append */}
+      <div ref={terminalRef} style={{
         position: 'fixed',
         top: '42%',
         left: '50%',
