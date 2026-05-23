@@ -1,0 +1,48 @@
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+
+# systemd as init — startup.sh launches this container with --entrypoint=/usr/bin/systemd
+# Inside the container, startup.sh re-runs with OS_ENV=slurm_container,
+# then setup.py handles config fetch, NFS mounts, and starting slurmd.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    systemd systemd-sysv \
+    munge libmunge-dev \
+    nfs-common \
+    curl ca-certificates gnupg \
+    python3 python3-venv python3-pip \
+    bc iproute2 dbus \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install gcloud CLI (for gsutil in prolog/epilog)
+RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && apt-get update && apt-get install -y --no-install-recommends google-cloud-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Slurm 25.05.6 pre-built binaries (from biowulf-controller build)
+COPY slurm-25.05-bin.tar.gz /tmp/
+RUN tar xzf /tmp/slurm-25.05-bin.tar.gz -C / && ldconfig && rm /tmp/slurm-25.05-bin.tar.gz
+
+# Slurm user + directories (UID 64030 matches biowulf-controller)
+RUN groupadd -g 64030 slurm && useradd -r -u 64030 -g 64030 -s /bin/bash -d /var/lib/slurm slurm \
+    && mkdir -p /var/spool/slurmd /var/log/slurm \
+       /slurm/scripts /slurm/custom_scripts/prolog.d /slurm/custom_scripts/epilog.d \
+       /slurm/custom_scripts/nodeset.d /slurm/custom_scripts/task_prolog.d /slurm/custom_scripts/task_epilog.d \
+    && chown -R slurm:slurm /var/spool/slurmd /var/log/slurm /slurm
+
+# Python venv for slurm-gcp scripts (setup.py, util.py, tpu.py)
+RUN python3 -m venv /slurm/python/venv \
+    && ln -sf python3 /slurm/python/venv/bin/python3.13 \
+    && /slurm/python/venv/bin/pip install --no-cache-dir \
+       google-cloud-storage google-cloud-secret-manager \
+       google-cloud-tpu google-api-python-client \
+       pyyaml addict requests more-executors
+
+# systemd units
+COPY slurmd.service sackd.service slurmcmd.timer slurmcmd.service /etc/systemd/system/
+RUN systemctl enable slurmd sackd slurmcmd.timer
+
+# OS_ENV tells startup.sh we're inside the container — skip docker launch, run setup.py
+ENV OS_ENV=slurm_container
+
+ENTRYPOINT ["/usr/bin/systemd"]

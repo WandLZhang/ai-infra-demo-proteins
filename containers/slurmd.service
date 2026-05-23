@@ -1,0 +1,14 @@
+[Unit]
+Description=Slurm node daemon
+After=network-online.target munge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/slurmd
+ExecStart=/usr/local/sbin/slurmd -D $SLURMD_OPTIONS
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

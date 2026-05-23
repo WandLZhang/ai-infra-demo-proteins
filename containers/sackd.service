@@ -1,0 +1,12 @@
+[Unit]
+Description=Slurm auth daemon
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/sackd
+ExecStart=/usr/local/sbin/sackd $SACKD_OPTIONS
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

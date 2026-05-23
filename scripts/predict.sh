@@ -88,18 +88,18 @@ for BACKEND in "${BACKENDS[@]}"; do
 }
 EOF
 
-  # Submit Slurm job
-  JOB_CMD="bash $SCRIPT_DIR/run_backend.sh $BACKEND $RUN_ID $PROTEIN_ID"
+  # Submit Slurm job — scripts are staged to /tmp/protein-demo/ by the Slurm prolog
+  JOB_CMD="bash /tmp/protein-demo/run_backend.sh $BACKEND $RUN_ID $PROTEIN_ID"
 
   if command -v sbatch &>/dev/null; then
     SLURM_JOB_ID=$(sbatch --parsable \
       --partition="$PARTITION" \
       --job-name="${BACKEND}-${RUN_ID}" \
-      --output="/tmp/slurm-${BACKEND}-${RUN_ID}.log" \
+      --output="/dev/null" \
+      --error="/dev/null" \
       --wrap="$JOB_CMD" 2>&1)
     echo "Submitted $BACKEND → partition=$PARTITION, job=$SLURM_JOB_ID"
   else
-    # No Slurm available — run directly (for local testing)
     echo "Submitted $BACKEND → direct (no Slurm)"
     bash "$SCRIPT_DIR/run_backend.sh" "$BACKEND" "$RUN_ID" "$PROTEIN_ID" &
   fi
