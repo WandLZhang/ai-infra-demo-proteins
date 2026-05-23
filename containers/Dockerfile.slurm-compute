@@ -47,11 +47,24 @@ RUN mkdir -p /slurm/custom_scripts/prolog.d && \
 # nsswitch: resolve UIDs via slurmctld (no need to create users manually)
 RUN echo "passwd: files sss slurm\ngroup: files sss slurm" > /etc/nsswitch.conf || true
 
+# slurmd conf-server — connect to biowulf-controller
+RUN echo 'SLURMD_OPTIONS=--conf-server=172.16.0.2:6820' > /etc/default/slurmd
+
+# Container init: downloads munge key from GCS before starting slurmd
+RUN echo '#!/bin/bash\n\
+# Download munge key from GCS\n\
+gsutil cat gs://wz-nih-demo-shared/munge.key.b64 2>/dev/null | base64 -d > /etc/munge/munge.key\n\
+chown munge:munge /etc/munge/munge.key\n\
+chmod 400 /etc/munge/munge.key\n\
+systemctl restart munge\n\
+# Start systemd (PID 1)\n\
+exec /usr/bin/systemd' > /usr/local/bin/container-init.sh && \
+    chmod +x /usr/local/bin/container-init.sh
+
 # systemd units
 COPY slurmd.service sackd.service slurmcmd.timer slurmcmd.service /etc/systemd/system/
 RUN systemctl enable slurmd sackd slurmcmd.timer
 
-# OS_ENV tells startup.sh we're inside the container — skip docker launch, run setup.py
 ENV OS_ENV=slurm_container
 
-ENTRYPOINT ["/usr/bin/systemd"]
+ENTRYPOINT ["/usr/local/bin/container-init.sh"]
