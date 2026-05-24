@@ -126,7 +126,11 @@ export default function App() {
           case 'sched_allocate':
             if (ev.vm) {
               setZoneStates(prev => ({ ...prev, [region]: prev[region] === 'active' || prev[region] === 'done' ? prev[region] : 'provisioning' }))
-              setVmStates(prev => ({ ...prev, [ev.vm!]: { name: ev.vm!, zone: region, state: 'provisioning', href: consoleUrl(ev) } }))
+              setVmStates(prev => {
+                const existing = prev[ev.vm!]
+                if (existing && (existing.state === 'active' || existing.state === 'done')) return prev
+                return { ...prev, [ev.vm!]: { name: ev.vm!, zone: region, state: 'provisioning', href: existing?.href || consoleUrl(ev) } }
+              })
             }
             break
           case 'allocate':
