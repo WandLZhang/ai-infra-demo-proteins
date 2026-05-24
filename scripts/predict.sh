@@ -1,12 +1,10 @@
 #!/bin/bash
 # predict.sh — sbatch entrypoint for the NIH Biowulf demo.
 #
-# Dispatches 6 parallel inference jobs (3 models × 2 silicons) across
-# Slurm partitions in the burst project. Each job writes progress to
-# GCS blobs that the frontend polls for live updates.
-#
-# All state goes to gs://BUCKET/job/ (flat — no run ID subfolders).
-# Frontend polls this single folder. On new submit, old blobs are cleared first.
+# Two-phase submission:
+#   Phase 1: Submit all 6 to Spot partitions (spot-tpu, spot-gpu). Shows Spot attempt.
+#   Phase 2: After timeout, any still-pending jobs get cancelled and resubmitted
+#            to guaranteed partitions (tpu, gpu). If Spot succeeded, jobs stay.
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -15,7 +13,6 @@ source "$SCRIPT_DIR/env.sh"
 PROTEIN_ID="${1:-hemoglobin}"
 JOB_DIR="$SHARED_BUCKET/job"
 
-# Protein sequences (same as frontend PROTEINS array)
 declare -A SEQUENCES
 SEQUENCES=(
   [brca1]="NAMEESVSREKPELTASTERVNKRMSLVLNQHSSRSEVFPEVSIFVDKRPESSRLSEAIRKQHVAMLISELPDHTSSLRQINEQLKVHQEETHLASCDPQRRSYLEFQQFNGIDSKVTKESLYFILAENLHDQYFDGRSLKLNKPFVCSKRVQCSCQKFKEATAVQGLHTQCFNQTPLRDDQDMVETDVWQLSNLECNTLQKLTSDIYQELAQTFGFLDVLWQCSKAGHQGLEKYLDTYLNHTFKQSQLEATLQGFKTDL"
@@ -23,27 +20,22 @@ SEQUENCES=(
   [hemoglobin]="MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR"
   [insulin]="LRELGQGSFGMVYEGNARDIIKGEAETRVAVKTVNESASLRERIEFLNEASVMKGFTCHHVVRLLGVVSKGQPTLVVMELMAHGDLKSYLRSLRPEAENNPGRPPPTLQEMIQMAAEIADGMAYLNAKKFVHRDLAARNCMVAH"
 )
-
 SEQUENCE="${SEQUENCES[$PROTEIN_ID]:-${SEQUENCES[hemoglobin]}}"
 
-# All 6 backends
 BACKENDS=("af2-tpu" "af2-gpu" "esmfold-tpu" "esmfold-gpu" "boltz2-tpu" "boltz2-gpu")
 
 echo "=== predict.sh ==="
 echo "Protein:  $PROTEIN_ID (${#SEQUENCE} aa)"
 echo "Backends: ${BACKENDS[*]}"
-echo "Bucket:   $JOB_DIR/"
 echo ""
 
-# Clear previous run (explicit prefix, not glob)
+# Clear previous run
 gsutil -q -m rm -r "$JOB_DIR" 2>/dev/null || true
 
-# Reset Spot nodes so Slurm tries them each run (shows failover in demo)
+# Reset Spot nodes
 if command -v scontrol &>/dev/null; then
-  for NODE in nihprotein-tpuv6eeast5a-1 nihprotein-tpuv6ecentral1-1 \
-              nihprotein-a100spotcentra-1 nihprotein-a100west1-1; do
-    scontrol update NodeName=$NODE State=IDLE 2>/dev/null || true
-  done
+  scontrol update NodeName=nihprotein-tpuv6ewest1c-0 State=IDLE 2>/dev/null || true
+  scontrol update NodeName=nihprotein-a100spoteast5-0 State=IDLE 2>/dev/null || true
 fi
 
 # Write manifest
@@ -57,18 +49,9 @@ cat <<EOF | gsutil -q cp - "$JOB_DIR/manifest.json"
 }
 EOF
 
-# Dispatch each backend as a separate Slurm job
+# Write initial queued state for all backends
 for BACKEND in "${BACKENDS[@]}"; do
-  MODEL=$(echo "$BACKEND" | cut -d- -f1)
-  SILICON=$(echo "$BACKEND" | cut -d- -f2)
-  if [[ "$SILICON" == "tpu" ]]; then
-    PARTITION="tpu"
-  else
-    PARTITION="gpu"
-  fi
-
-  # Write initial queued state
-  cat <<EOF | gsutil -q cp - "$JOB_DIR/$BACKEND.json"
+  cat <<EOF | gsutil -q cp - "$JOB_DIR/$BACKEND.json" &
 {
   "backend_id": "$BACKEND",
   "protein_id": "$PROTEIN_ID",
@@ -81,25 +64,74 @@ for BACKEND in "${BACKENDS[@]}"; do
   "error": null
 }
 EOF
-
-  JOB_CMD="export HOME=/tmp; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo; gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
-
-  if command -v sbatch &>/dev/null; then
-    SLURM_JOB_ID=$(sbatch --parsable \
-      --partition="$PARTITION" \
-      --job-name="${BACKEND}" \
-      --output="/dev/null" \
-      --error="/dev/null" \
-      --wrap="$JOB_CMD" 2>&1)
-    echo "Submitted $BACKEND → partition=$PARTITION, job=$SLURM_JOB_ID"
-    TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    SEQ="$(date +%s%N)"
-    echo "{\"ts\":\"$TS\",\"type\":\"dispatch\",\"backend\":\"$BACKEND\",\"partition\":\"$PARTITION\",\"job_id\":\"$SLURM_JOB_ID\",\"msg\":\"sbatch $BACKEND → $PARTITION (job $SLURM_JOB_ID)\"}" | gsutil -q cp - "$JOB_DIR/log/${SEQ}-dispatch.json" 2>/dev/null || true
-  else
-    echo "Submitted $BACKEND → direct (no Slurm)"
-    bash "$SCRIPT_DIR/run_backend.sh" "$BACKEND" "$PROTEIN_ID" &
-  fi
 done
+wait
+
+build_wrap() {
+  local BACKEND="$1"
+  echo "export HOME=/tmp; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo; gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
+}
+
+# ── Phase 1: Submit all to Spot partitions ──
+declare -A SPOT_JOBS
+echo "Phase 1: trying Spot..."
+for BACKEND in "${BACKENDS[@]}"; do
+  SILICON=$(echo "$BACKEND" | cut -d- -f2)
+  if [[ "$SILICON" == "tpu" ]]; then PARTITION="spot-tpu"; else PARTITION="spot-gpu"; fi
+
+  JOB_CMD=$(build_wrap "$BACKEND")
+  SLURM_JOB_ID=$(sbatch --parsable \
+    --partition="$PARTITION" \
+    --job-name="${BACKEND}" \
+    --output="/dev/null" \
+    --error="/dev/null" \
+    --wrap="$JOB_CMD" 2>&1)
+  SPOT_JOBS[$BACKEND]="$SLURM_JOB_ID"
+  echo "  Spot: $BACKEND → $PARTITION (job $SLURM_JOB_ID)"
+
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  SEQ="$(date +%s%N)"
+  echo "{\"ts\":\"$TS\",\"type\":\"dispatch\",\"backend\":\"$BACKEND\",\"partition\":\"$PARTITION\",\"job_id\":\"$SLURM_JOB_ID\",\"msg\":\"sbatch $BACKEND → $PARTITION (job $SLURM_JOB_ID)\"}" | gsutil -q cp - "$JOB_DIR/log/${SEQ}-dispatch.json" 2>/dev/null || true &
+done
+wait
+
+# ── Wait for Spot to resolve (succeed or timeout) ──
+SPOT_WAIT=65
+echo "Waiting ${SPOT_WAIT}s for Spot..."
+sleep "$SPOT_WAIT"
+
+# ── Phase 2: Check results, resubmit failures to guaranteed ──
+echo "Phase 2: checking Spot results..."
+for BACKEND in "${BACKENDS[@]}"; do
+  JOB_ID="${SPOT_JOBS[$BACKEND]}"
+  JOB_STATE=$(scontrol show job "$JOB_ID" 2>/dev/null | grep -oP 'JobState=\K\S+')
+
+  if [[ "$JOB_STATE" == "COMPLETED" || "$JOB_STATE" == "RUNNING" ]]; then
+    echo "  $BACKEND: Spot succeeded (state=$JOB_STATE)"
+    continue
+  fi
+
+  # Spot failed — cancel and resubmit to guaranteed
+  echo "  $BACKEND: Spot failed (state=$JOB_STATE) → resubmitting to guaranteed"
+  scancel "$JOB_ID" 2>/dev/null || true
+
+  SILICON=$(echo "$BACKEND" | cut -d- -f2)
+  if [[ "$SILICON" == "tpu" ]]; then PARTITION="tpu"; else PARTITION="gpu"; fi
+
+  JOB_CMD=$(build_wrap "$BACKEND")
+  NEW_JOB_ID=$(sbatch --parsable \
+    --partition="$PARTITION" \
+    --job-name="${BACKEND}" \
+    --output="/dev/null" \
+    --error="/dev/null" \
+    --wrap="$JOB_CMD" 2>&1)
+  echo "  $BACKEND → $PARTITION (job $NEW_JOB_ID)"
+
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  SEQ="$(date +%s%N)"
+  echo "{\"ts\":\"$TS\",\"type\":\"dispatch\",\"backend\":\"$BACKEND\",\"partition\":\"$PARTITION\",\"job_id\":\"$NEW_JOB_ID\",\"msg\":\"resubmit $BACKEND → $PARTITION (job $NEW_JOB_ID)\"}" | gsutil -q cp - "$JOB_DIR/log/${SEQ}-dispatch.json" 2>/dev/null || true &
+done
+wait
 
 echo ""
 echo "Monitor: gsutil ls $JOB_DIR/"
