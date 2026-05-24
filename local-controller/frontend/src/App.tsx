@@ -162,7 +162,7 @@ export default function App() {
                 }
               }
               if (!found && ev.nodeset) {
-                updated[`spot-${ev.nodeset}`] = { name: `${ev.nodeset} (Spot)`, zone: region, state: 'failed', href: '' }
+                updated[`spot-${ev.nodeset}`] = { name: ev.nodeset!, zone: region, state: 'failed', href: '' }
               }
               return updated
             })
