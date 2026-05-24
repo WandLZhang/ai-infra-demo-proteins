@@ -11,6 +11,7 @@ The ONLY difference from esmfold-gpu/predict.py:
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -85,3 +86,26 @@ def predict_structure(sequence: str) -> dict[str, Any]:
         "seq_len": seq_len,
         "model": "ESMFold",
     }
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="ESMFold TPU inference")
+    parser.add_argument("fasta", help="Input FASTA file")
+    parser.add_argument("--out-dir", default="/tmp/esmfold_tpu_out")
+    args = parser.parse_args()
+
+    with open(args.fasta) as f:
+        lines = f.read().strip().split("\n")
+    sequence = "".join(l for l in lines if not l.startswith(">"))
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    result = predict_structure(sequence)
+
+    pdb_path = os.path.join(args.out_dir, "prediction.pdb")
+    with open(pdb_path, "w") as f:
+        f.write(result["pdb"])
+
+    print(f"\nESMFold TPU: {result['solve_time_ms']:.0f}ms")
+    print(f"pLDDT: {result['plddt_mean']:.1f}")
+    print(f"PDB: {pdb_path}")

@@ -133,3 +133,45 @@ def predict_structure(features_pkl_path: str) -> dict[str, Any]:
         "num_devices": len(state.devices),
         "seq_len": int(feature_dict["aatype"].shape[0]),
     }
+
+
+def _download_features(protein_id: str) -> str:
+    """Download pre-computed features.pkl from GCS for the given protein."""
+    local_dir = Path(f"/tmp/af2-features/{protein_id}")
+    local_dir.mkdir(parents=True, exist_ok=True)
+    local_path = local_dir / "features.pkl"
+    if local_path.exists() and local_path.stat().st_size > 0:
+        return str(local_path)
+
+    blob_path = f"alphafold-features/features_{protein_id}.pkl"
+    client = storage.Client()
+    bucket = client.bucket(_PARAMS_BUCKET)
+    blob = bucket.blob(blob_path)
+    print(f"[af2-tpu] downloading gs://{_PARAMS_BUCKET}/{blob_path} -> {local_path}")
+    blob.download_to_filename(str(local_path))
+    return str(local_path)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="AlphaFold2 TPU inference")
+    parser.add_argument("fasta", help="Input FASTA file")
+    parser.add_argument("--out-dir", default="/tmp/af2_tpu_out")
+    args = parser.parse_args()
+
+    with open(args.fasta) as f:
+        header = f.readline().strip()
+    protein_id = header.lstrip(">").split("|")[0].strip().lower()
+
+    features_path = _download_features(protein_id)
+    os.makedirs(args.out_dir, exist_ok=True)
+    result = predict_structure(features_path)
+
+    pdb_path = os.path.join(args.out_dir, "prediction.pdb")
+    with open(pdb_path, "w") as f:
+        f.write(result["pdb"])
+
+    print(f"\nAlphaFold2 TPU: {result['solve_time_ms']:.0f}ms")
+    print(f"pLDDT: {result['plddt_mean']:.1f}")
+    print(f"PDB: {pdb_path}")
+    print(f"Device: {result['device_kind']}")
