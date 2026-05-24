@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+import torch_xla
+torch_xla.experimental.eager_mode(True)
 import torch_xla.core.xla_model as xm
 from transformers import AutoTokenizer, EsmForProteinFolding
 
