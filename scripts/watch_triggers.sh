@@ -1,9 +1,6 @@
 #!/bin/bash
 # watch_triggers.sh — Runs on the controller VM, polls GCS for trigger blobs,
 # and executes predict.sh when one appears.
-#
-# Usage: bash scripts/watch_triggers.sh
-# (Run via nohup or systemd on the controller VM)
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -31,19 +28,14 @@ while true; do
 
     echo "[$(date)] New trigger: $TRIGGER_PATH"
     TRIGGER_JSON=$(gsutil cat "$TRIGGER_PATH" 2>/dev/null)
-    RUN_ID=$(echo "$TRIGGER_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['run_id'])" 2>/dev/null)
     PROTEIN_ID=$(echo "$TRIGGER_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['protein_id'])" 2>/dev/null)
 
-    if [ -n "$RUN_ID" ] && [ -n "$PROTEIN_ID" ]; then
-      echo "[$(date)] Running predict.sh: run_id=$RUN_ID protein=$PROTEIN_ID"
-      RUN_ID_OVERRIDE="$RUN_ID" bash "$SCRIPT_DIR/predict.sh" "$PROTEIN_ID" 2>&1 | while read -r line; do
+    if [ -n "$PROTEIN_ID" ]; then
+      echo "[$(date)] Running predict.sh: protein=$PROTEIN_ID"
+      bash "$SCRIPT_DIR/predict.sh" "$PROTEIN_ID" 2>&1 | while read -r line; do
         echo "  $line"
       done
-      echo "[$(date)] predict.sh complete for $RUN_ID"
-
-      # Start squeue poller in background to stream live state to GCS
-      echo "[$(date)] Starting squeue poller for $RUN_ID"
-      bash "$SCRIPT_DIR/poll_squeue.sh" "$RUN_ID" >> /tmp/poll_squeue.log 2>&1 &
+      echo "[$(date)] predict.sh complete"
     else
       echo "[$(date)] ERROR: Could not parse trigger: $TRIGGER_JSON"
     fi

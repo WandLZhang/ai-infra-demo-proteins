@@ -1,6 +1,6 @@
 import React, { useCallback, useRef } from 'react'
 import { GoogleMap, useJsApiLoader } from '@react-google-maps/api'
-import ZoneMarker, { type MarkerState } from './ZoneMarker'
+import ZoneMarker, { type MarkerState, type VMInfo } from './ZoneMarker'
 import type { BackendId, LaneStatus } from '../types'
 import { BACKENDS } from '../backends'
 import { HUD_MAP_STYLES } from '../mapStyles'
@@ -19,12 +19,12 @@ export interface ZoneInfo {
 export const BIOWULF_HOME = { lat: 38.9988, lng: -77.1020 }
 
 export const ZONE_LOCATIONS: ZoneInfo[] = [
-  { id: 'us-west1',    lat: 45.6015, lng: -121.1842, label: 'us-west1',    backends: [] },
+  { id: 'us-west1',    lat: 45.6015, lng: -121.1842, label: 'us-west1',    backends: ['af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
   { id: 'us-west2',    lat: 34.0537, lng: -118.2428, label: 'us-west2',    backends: [] },
   { id: 'us-west3',    lat: 40.7596, lng: -111.8868, label: 'us-west3',    backends: [] },
   { id: 'us-west4',    lat: 36.1674, lng: -115.1484, label: 'us-west4',    backends: [] },
   { id: 'us-west8',    lat: 33.4484, lng: -112.0741, label: 'us-west8',    backends: [] },
-  { id: 'us-central1', lat: 41.2588, lng:  -95.8519, label: 'us-central1', backends: ['af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
+  { id: 'us-central1', lat: 41.2588, lng:  -95.8519, label: 'us-central1', backends: ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu', 'af2-gpu', 'esmfold-gpu', 'boltz2-gpu'] },
   { id: 'us-south1',   lat: 32.7763, lng:  -96.7969, label: 'us-south1',   backends: [] },
   { id: 'us-east1',    lat: 33.1960, lng:  -80.0131, label: 'us-east1',    backends: [] },
   { id: 'us-east4',    lat: 39.0298, lng:  -77.4744, label: 'us-east4',    backends: [] },
@@ -35,6 +35,7 @@ export const ZONE_LOCATIONS: ZoneInfo[] = [
 interface InfraMapProps {
   lanes: Record<BackendId, LaneStatus>
   zoneStates: Record<string, MarkerState>
+  vmStates: Record<string, { name: string, zone: string, state: string, href: string }>
   onZoneClick: (zone: ZoneInfo) => void
   center: google.maps.LatLngLiteral
   zoom: number
@@ -50,7 +51,7 @@ const mapOptions: google.maps.MapOptions = {
   backgroundColor: '#171717',
 }
 
-export default function InfraMap({ lanes, zoneStates, onZoneClick, center, zoom }: InfraMapProps) {
+export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, center, zoom }: InfraMapProps) {
   const { isLoaded } = useJsApiLoader({ googleMapsApiKey: MAPS_API_KEY })
 
   // Two map instances stacked, cross-fade between them.
@@ -141,15 +142,25 @@ export default function InfraMap({ lanes, zoneStates, onZoneClick, center, zoom 
         state="done"
         onClick={() => {}}
       />
-      {ZONE_LOCATIONS.map(zone => (
-        <ZoneMarker
-          key={zone.id}
-          position={{ lat: zone.lat, lng: zone.lng }}
-          label={zone.label}
-          state={zoneStates[zone.id] || 'idle'}
-          onClick={() => onZoneClick(zone)}
-        />
-      ))}
+      {ZONE_LOCATIONS.map(zone => {
+        const zoneVms: VMInfo[] = Object.values(vmStates)
+          .filter(vm => vm.zone === zone.id)
+          .map(vm => ({
+            name: vm.name,
+            href: vm.href,
+            state: vm.state as MarkerState,
+          }))
+        return (
+          <ZoneMarker
+            key={zone.id}
+            position={{ lat: zone.lat, lng: zone.lng }}
+            label={zone.label}
+            state={zoneStates[zone.id] || 'idle'}
+            vms={zoneVms}
+            onClick={() => onZoneClick(zone)}
+          />
+        )
+      })}
     </>
   )
 

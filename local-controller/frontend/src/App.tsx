@@ -2,12 +2,12 @@ import React, { useState, useCallback, useRef, useEffect } from 'react'
 import './hud.css'
 
 import InfraMap, { type ZoneInfo, BIOWULF_HOME } from './components/InfraMap'
+import type { MarkerState } from './components/ZoneMarker'
 import SideLadder from './components/SideLadder'
-import Scorecard from './components/Scorecard'
 import InfoButton from './components/InfoButton'
 import type { Protein, ModelId, BackendId, LaneStatus, PredictResponse } from './types'
 import { BACKENDS } from './backends'
-import { submitRun, pollStatus, pollEvents, getLatestRun, blobToLaneStatus } from './api'
+import { submitRun, pollStatus, pollEvents } from './api'
 
 const PROTEINS: Protein[] = [
   { id: 'brca1', name: 'BRCA1 BRCT', sequence: 'NAMEESVSREKPELTASTERVNKRMS...', uniprotId: 'P38398', description: 'Breast cancer tumor suppressor — DNA repair', residueCount: 214 },
@@ -31,79 +31,147 @@ export default function App() {
     Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>
   )
   const [phase, setPhase] = useState<Phase>('home')
-  const [showScorecard, setShowScorecard] = useState(false)
   const [currentProtein, setCurrentProtein] = useState<Protein>(PROTEINS[0])
   const [proteinMenuOpen, setProteinMenuOpen] = useState(false)
   const [selectedZone, setSelectedZone] = useState<ZoneInfo | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [dispatchLines, setDispatchLines] = useState<string[]>([])
   const [infoOpen, setInfoOpen] = useState(false)
-  const lineQueue = useRef<string[]>([])
+  const lineQueue = useRef<import('./api').SlurmEvent[]>([])
   const dripRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [zoneStates, setZoneStates] = useState<Record<string, string>>({})
+  const [zoneStates, setZoneStates] = useState<Record<string, MarkerState>>({})
+  const [vmStates, setVmStates] = useState<Record<string, { name: string, zone: string, state: string, href: string }>>({})
 
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
     : { lat: 39.5, lng: -98.35 }
   const mapZoom = phase === 'home' ? 12 : 5
 
-  const updateLane = useCallback((id: BackendId, update: Partial<LaneStatus>) => {
-    setLanes(prev => ({ ...prev, [id]: { ...prev[id], ...update } }))
-  }, [])
-
   const lastEventCount = useRef(0)
-  const prevStates = useRef<Record<string, string>>({})
   const terminalRef = useRef<HTMLDivElement>(null)
+  const terminalDone = useRef(false)
 
-  const startPolling = useCallback((runId: string) => {
+  function consoleUrl(ev: { vm?: string | null, zone?: string, partition?: string, project?: string }): string {
+    if (!ev.vm || !ev.zone || !ev.project) return ''
+    if (ev.partition === 'tpu')
+      return `https://console.cloud.google.com/compute/tpus/details/${ev.zone}/${ev.vm}?project=${ev.project}`
+    return `https://console.cloud.google.com/compute/instancesDetail/zones/${ev.zone}/instances/${ev.vm}?project=${ev.project}`
+  }
+
+  const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current)
     if (dripRef.current) clearTimeout(dripRef.current)
     lastEventCount.current = 0
-    prevStates.current = {}
     lineQueue.current = []
+    terminalDone.current = false
 
     const drainNext = () => {
       if (lineQueue.current.length === 0) {
         dripRef.current = setTimeout(drainNext, 500) as any
         return
       }
-      const item = lineQueue.current.shift()!
-      if (typeof item === 'object' && (item as any).__laneUpdate) {
-        const { backendId, update } = item as any
-        updateLane(backendId as BackendId, update)
-      } else {
-        const text = typeof item === 'string' ? item : (item as any).__text || ''
-        if (text) {
-          setDispatchLines(prev => [...prev, text])
-          // Parse zone from log events and update map markers
-          const nodeMatch = text.match(/nihprotein-(\w+?)(?:east5|central1|west1|south1|east1|east4|east7)/)
-          const zoneMatch = text.match(/(?:us-(?:east5|central1|west1|south1|east1|east4|east7))/)
-          if (text.includes('no Spot capacity') || text.includes('no capacity')) {
-            const region = text.match(/in\s+(\S+)/)?.[1] || ''
-            const zone = region.includes('east5') ? 'us-east5' : region.includes('central1') ? 'us-central1' : region.includes('west1') ? 'us-west1' : region.includes('south1') ? 'us-south1' : region.includes('east1') ? 'us-east1' : ''
-            if (zone) setZoneStates(prev => ({ ...prev, [zone]: 'failed' }))
-          } else if (text.includes('allocating on') || text.includes('loading model') || text.includes('inferring')) {
-            const zone = text.includes('east5a') ? 'us-east5' : text.includes('central1') ? 'us-central1' : text.includes('west1') ? 'us-west1' : text.includes('east5b') ? 'us-east5' : ''
-            if (zone) setZoneStates(prev => ({ ...prev, [zone]: 'active' }))
-          } else if (text.includes('sched: allocate')) {
-            const zone = text.includes('east5') ? 'us-east5' : text.includes('central1') ? 'us-central1' : text.includes('west1') ? 'us-west1' : ''
-            if (zone) setZoneStates(prev => ({ ...prev, [zone]: 'provisioning' }))
-          } else if (text.includes('requeue') && text.includes('next zone')) {
-            // requeue doesn't change zone state — the next sched event will
-          }
+      const ev = lineQueue.current.shift()! as any
+
+      // ── Terminal: show msg for all visible event types ──
+      if (!terminalDone.current && ev.type !== 'node_up') {
+        if (ev.type === 'complete') {
+          terminalDone.current = true
+        } else {
+          setDispatchLines(prev => [...prev, ev.msg])
+        }
+      }
+
+      // ── Side ladder: update lane state from structured fields ──
+      const bid = ev.backend as BackendId | undefined
+      if (bid && BACKENDS.some(b => b.id === bid)) {
+        switch (ev.type) {
+          case 'dispatch':
+            setLanes(prev => ({ ...prev, [bid]: { ...prev[bid], state: 'queued' } }))
+            break
+          case 'sched_allocate':
+          case 'allocate':
+            setLanes(prev => ({ ...prev, [bid]: { ...prev[bid], state: 'allocating' } }))
+            break
+          case 'loading':
+            setLanes(prev => ({ ...prev, [bid]: { ...prev[bid], state: 'loading' } }))
+            break
+          case 'inferring':
+            setLanes(prev => ({ ...prev, [bid]: { ...prev[bid], state: 'inferring' } }))
+            break
+          case 'done':
+            setLanes(prev => ({
+              ...prev,
+              [bid]: {
+                ...prev[bid],
+                state: 'done',
+                elapsedMs: ev.elapsed_ms || prev[bid].elapsedMs,
+                costAccumulated: ev.cost || prev[bid].costAccumulated,
+                completedAt: new Date(ev.ts).getTime(),
+              },
+            }))
+            break
+          case 'failed':
+            setLanes(prev => ({ ...prev, [bid]: { ...prev[bid], state: 'failed', error: ev.error || 'unknown' } }))
+            break
+          case 'requeue':
+            setLanes(prev => ({ ...prev, [bid]: { ...prev[bid], state: 'queued' } }))
+            break
+        }
+      }
+
+      // ── Map markers: update zone state + VM entries from structured fields ──
+      const region = ev.region as string | undefined
+      if (region) {
+        switch (ev.type) {
+          case 'sched_allocate':
+            if (ev.vm) {
+              setZoneStates(prev => ({ ...prev, [region]: prev[region] === 'active' || prev[region] === 'done' ? prev[region] : 'provisioning' }))
+              setVmStates(prev => ({ ...prev, [ev.vm!]: { name: ev.vm!, zone: region, state: 'provisioning', href: consoleUrl(ev) } }))
+            }
+            break
+          case 'allocate':
+            if (ev.vm) {
+              setZoneStates(prev => ({ ...prev, [region]: 'active' }))
+              setVmStates(prev => ({ ...prev, [ev.vm!]: { name: ev.vm!, zone: region, state: 'active', href: consoleUrl(ev) } }))
+            }
+            break
+          case 'done':
+            if (ev.vm) {
+              setVmStates(prev => prev[ev.vm!] ? { ...prev, [ev.vm!]: { ...prev[ev.vm!], state: 'done' } } : prev)
+            }
+            break
+          case 'failed':
+            if (ev.vm) {
+              setVmStates(prev => prev[ev.vm!] ? { ...prev, [ev.vm!]: { ...prev[ev.vm!], state: 'failed' } } : prev)
+              setZoneStates(prev => ({ ...prev, [region]: prev[region] === 'active' || prev[region] === 'done' ? prev[region] : 'failed' }))
+            }
+            break
+          case 'spot_fail':
+            setZoneStates(prev => ({ ...prev, [region]: prev[region] === 'active' || prev[region] === 'done' ? prev[region] : 'failed' }))
+            setVmStates(prev => {
+              const updated = { ...prev }
+              let found = false
+              for (const [key, vm] of Object.entries(updated)) {
+                if (vm.zone === region && vm.state === 'provisioning') {
+                  updated[key] = { ...vm, state: 'failed' }
+                  found = true
+                }
+              }
+              if (!found && ev.nodeset) {
+                updated[`spot-${ev.nodeset}`] = { name: `${ev.nodeset} (Spot)`, zone: region, state: 'failed', href: '' }
+              }
+              return updated
+            })
+            break
         }
       }
 
       // Peek at next item's timestamp to calculate delay
       let delay = 600
       if (lineQueue.current.length > 0) {
-        const curr = item as any
         const next = lineQueue.current[0] as any
-        const currTs = curr?.ts || curr?.__ts
-        const nextTs = next?.ts || next?.__ts
-        if (currTs && nextTs) {
-          const gap = new Date(nextTs).getTime() - new Date(currTs).getTime()
+        if (ev.ts && next.ts) {
+          const gap = new Date(next.ts).getTime() - new Date(ev.ts).getTime()
           delay = Math.max(100, gap)
         }
       }
@@ -113,39 +181,15 @@ export default function App() {
     pollRef.current = setInterval(async () => {
       try {
         const [status, events] = await Promise.all([
-          pollStatus(runId),
-          pollEvents(runId),
+          pollStatus(),
+          pollEvents(),
         ])
 
-        // Queue lane updates — expand state jumps into intermediate steps
-        const STATE_ORDER = ['idle', 'queued', 'allocating', 'loading', 'inferring', 'done']
-        for (const [backendId, blob] of Object.entries(status.lanes)) {
-          const newState = blob.state || 'idle'
-          const oldState = prevStates.current[backendId] || 'idle'
-          if (newState !== oldState && newState !== 'idle') {
-            const oldIdx = STATE_ORDER.indexOf(oldState)
-            const newIdx = STATE_ORDER.indexOf(newState)
-            const steps = STATE_ORDER.slice(Math.max(oldIdx + 1, 1), newIdx + 1)
-            for (const step of steps) {
-              const ts = blob.completed_at || blob.started_at || new Date().toISOString()
-              if (step === 'done') {
-                const full = blobToLaneStatus(blob, backendId as BackendId)
-                lineQueue.current.push({ __laneUpdate: true, __ts: ts, backendId, update: full } as any)
-              } else {
-                const partial: Partial<LaneStatus> = { backendId: backendId as BackendId, state: step as LaneStatus['state'] }
-                lineQueue.current.push({ __laneUpdate: true, __ts: ts, backendId, update: partial } as any)
-              }
-            }
-          }
-          prevStates.current[backendId] = newState
-        }
-
         if (events.length > lastEventCount.current) {
-          const newMsgs = events.slice(lastEventCount.current)
-            .map(e => e.msg)
-            .filter(m => !m.startsWith('squeue poller'))
-          if (newMsgs.length > 0) {
-            lineQueue.current.push(...newMsgs.map(m => ({ __text: m, ts: events[lastEventCount.current]?.ts } as any)))
+          const newEvents = events.slice(lastEventCount.current)
+            .filter(e => e.type !== 'node_up')
+          if (newEvents.length > 0) {
+            lineQueue.current.push(...newEvents)
           }
           lastEventCount.current = events.length
         }
@@ -154,13 +198,12 @@ export default function App() {
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = null
           setPhase('done')
-          setShowScorecard(true)
-        }
+                  }
       } catch (err) {
         console.error('Poll error:', err)
       }
     }, 2000)
-  }, [updateLane])
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -177,15 +220,19 @@ export default function App() {
 
   const handleSubmit = useCallback(async () => {
     setPhase('dispatching')
-    setShowScorecard(false)
-    setDispatchLines([])
+        setDispatchLines([])
     setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
+    setZoneStates({})
+    setVmStates({})
 
     try {
       const result = await submitRun(currentProtein.id)
-      setActiveRunId(result.run_id)
-      setPhase('running')
-      startPolling(result.run_id)
+      if (result.already_running) {
+        setPhase('running')
+      } else {
+        setPhase('running')
+      }
+      startPolling()
     } catch (err) {
       console.error('Submit failed:', err)
       setDispatchLines([`Error: ${err}`])
@@ -205,15 +252,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [phase, handleSubmit])
 
-  const tpuTotal = BACKENDS.filter(b => b.siliconId === 'tpu').reduce((s, b) => s + (lanes[b.id]?.costAccumulated || 0), 0)
-  const gpuTotal = BACKENDS.filter(b => b.siliconId === 'gpu').reduce((s, b) => s + (lanes[b.id]?.costAccumulated || 0), 0)
-  const savingsStr = tpuTotal > 0 && gpuTotal > 0 ? `${(gpuTotal / tpuTotal).toFixed(1)}×` : undefined
   const isRunning = phase === 'dispatching' || phase === 'running'
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#171717', overflow: 'hidden', position: 'relative' }}>
       {/* Fullscreen map — zoom driven by phase */}
-      <InfraMap lanes={lanes} zoneStates={zoneStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} />
+      <InfraMap lanes={lanes} zoneStates={zoneStates} vmStates={vmStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} />
 
       {/* Top-left: Hamburger menu */}
       <div style={{ position: 'fixed', top: 15, left: 15, zIndex: 25 }}>
@@ -314,13 +358,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Scorecard */}
-      {showScorecard && (
-        <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 20, maxWidth: 320 }}>
-          <Scorecard lanes={lanes} />
-        </div>
-      )}
-
       {/* Info button — top right, same style as hamburger menu */}
       <div style={{ position: 'fixed', top: 15, right: 15, zIndex: 25 }}>
       <InfoButton
@@ -360,8 +397,4 @@ export default function App() {
       )}
     </div>
   )
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
