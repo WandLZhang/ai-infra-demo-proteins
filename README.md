@@ -1,225 +1,192 @@
 # NIH Biowulf Protein Structure Prediction Demo
 
-Live demo for the NIH Biowulf HPC briefing (June 4, 2026). Presenter presses Enter to dispatch 6 protein inference jobs (3 models × 2 silicons) via Slurm from an on-prem controller to cloud compute nodes.
+Live demo for the NIH Biowulf HPC briefing (June 4, 2026). Presenter presses Enter to dispatch 6 protein inference jobs (3 models × 2 silicons) via Slurm from an on-prem controller to cloud compute nodes across 3 CONUS regions.
 
 ## Architecture
 
 ```
-Frontend (React)
-  │  POST /api/submit
-  ▼
-Cloud Run ──► writes trigger to GCS
-                    │
-                    ▼  (~3s)
-biowulf-controller (wz-nih-demo-controller, 172.16.0.2)
-  │  trigger watcher → predict.sh → sbatch 6 jobs
-  │  slurmctld dispatches to weighted nodesets
-  ▼
-Cloud compute nodes (wz-nih-demo-burst)
-  │  resume.py creates VMs → startup.sh pulls Docker container
-  │  slurmd registers with controller via VPC peering
-  │  prolog stages run_backend.sh from GCS
-  │  job runs → writes state to GCS
-  ▼
-GCS (gs://wz-nih-demo-shared/jobs/{run_id}/*.json)
-  │  publicly readable, CORS enabled
-  ▼
-Frontend polls storage.googleapis.com directly
+┌─────────────────────────────┐     VPC Peering     ┌──────────────────────────────┐
+│  wz-nih-demo-controller     │◄───────────────────►│  wz-nih-demo-burst           │
+│                             │                     │                              │
+│  biowulf-controller         │                     │  TPU v6e (us-east5-a)  w=10  │
+│  - slurmctld                │                     │  TPU v6e (us-central1-b) w=11│
+│  - server.py (:8080)        │                     │  A100 GPU (us-central1-f) w=10│
+│  - trigger-watcher.service  │                     │  A100 GPU (us-west1-b)  w=11 │
+│  - poll-squeue.service      │                     │  + Spot nodesets (w=1-2)     │
+└─────────────────────────────┘                     └──────────────────────────────┘
+         ▲                                                     │
+         │ POST /api/submit                                    │ GCS events
+         │                                                     ▼
+    ┌────┴──────────────────────────────────────────────────────┐
+    │  Frontend (Vite dev / Cloud Run prod)                     │
+    │  Polls gs://wz-nih-demo-shared/job/log/*.json             │
+    │  Polls gs://wz-nih-demo-shared/job/{backend}.json         │
+    └───────────────────────────────────────────────────────────┘
 ```
 
-## Deployment — Step by Step
+## Projects & IAM
 
-### 1. Pre-provision compute nodes (DWS Flex + on-demand)
+| Resource | Project | Service Account |
+|----------|---------|-----------------|
+| Controller VM | wz-nih-demo-controller | 281348638866-compute (objectAdmin on shared bucket) |
+| Compute VMs | wz-nih-demo-burst | 212183265679-compute (objectAdmin on shared bucket) |
+| GCS bucket | wz-nih-demo-shared | Both SAs have storage.objectAdmin |
 
-Pre-warm VMs before the demo. They stay up for 7 days (Flex) or until deleted (on-demand).
+## Compute Nodes
 
-```bash
-# TPU v6e via DWS Flex (guaranteed capacity, us-east5-a)
-gcloud alpha compute tpus queued-resources create demo-tpu \
-  --project=wz-nih-demo-burst --zone=us-east5-a \
-  --accelerator-type=v6e-4 --runtime-version=v2-alpha-tpuv6e \
-  --node-id=nihprotein-tpuv6eeast5a-0 \
-  --network=default --subnetwork=default \
-  --service-account=212183265679-compute@developer.gserviceaccount.com
+4 pre-warmed guaranteed nodes + Spot nodesets for failover visual:
 
-# A100 40GB on-demand (us-central1-f)
-gcloud compute instances create nihprotein-a100spotcentra-0 \
-  --project=wz-nih-demo-burst --zone=us-central1-f \
-  --machine-type=a2-highgpu-1g \
-  --accelerator=type=nvidia-tesla-a100,count=1 \
-  --maintenance-policy=TERMINATE --no-restart-on-failure \
-  --network=default \
-  --service-account=212183265679-compute@developer.gserviceaccount.com \
-  --scopes=cloud-platform \
-  --image-family=ubuntu-2204-lts --image-project=ubuntu-os-cloud \
-  --boot-disk-size=100GB
+| VM | Zone | Type | Weight | Role |
+|----|------|------|--------|------|
+| nihprotein-tpuv6ewest1c-[0-1] | us-west1-c | TPU v6e Spot | 1 | Try first (Spot, likely fails) |
+| nihprotein-tpuv6eeast5b-[0-1] | us-east5-b | TPU v6e Spot | 2 | Try second (Spot) |
+| nihprotein-a100spoteast5-[0-1] | us-east5 | A100 Spot | 1 | Try first (Spot, likely fails) |
+| nihprotein-tpuv6eeast5a-0 | us-east5-a | TPU v6e | **10** | Guaranteed fallback |
+| nihprotein-tpuv6ecentral1-0 | us-central1-b | TPU v6e | **11** | Guaranteed fallback |
+| nihprotein-a100spotcentra-0 | us-central1-f | A100 40GB | **10** | Guaranteed fallback |
+| nihprotein-a100west1-0 | us-west1-b | A100 40GB | **11** | Guaranteed fallback |
+
+Weight ladder: Slurm tries lowest weight first. Spot nodes (w=1-2) fail → requeue → guaranteed nodes (w=10-11) succeed. Frontend shows yellow→red→green transition.
+
+## GCS Layout
+
+All state in `gs://wz-nih-demo-shared/job/` (flat, no run subfolders):
+
+```
+job/
+  manifest.json          # run metadata (protein, submitted_at)
+  af2-tpu.json           # backend state blob
+  af2-gpu.json
+  esmfold-tpu.json
+  esmfold-gpu.json
+  boltz2-tpu.json
+  boltz2-gpu.json
+  log/
+    {nanosecond_ts}-{source}.json   # structured event stream
 ```
 
-### 2. Set up each compute node with the Slurm container
+## Structured Event Schema
 
-Run this on **each** compute VM (TPU and GPU):
+Every log event has `ts`, `type`, `msg`. Additional fields per type:
+
+| type | Fields | Source |
+|------|--------|--------|
+| dispatch | backend, partition, job_id | predict.sh |
+| sched_allocate | vm, region, partition | poll_squeue.sh |
+| allocate | backend, vm, zone, region, partition, project | run_backend.sh |
+| loading | backend, vm, zone, region, partition, project | run_backend.sh |
+| inferring | backend, vm, zone, region, partition, project, protein_id, seq_len | run_backend.sh |
+| done | backend, vm, zone, region, partition, project, elapsed_ms, cost | run_backend.sh |
+| spot_fail | nodeset, region | poll_squeue.sh |
+| requeue | job_id | poll_squeue.sh |
+
+The frontend reads these fields directly — no text parsing. Terminal, side ladder, and map markers all update from the same event stream in lockstep.
+
+## Deployment
+
+### 1. Deploy scripts to controller + GCS
 
 ```bash
-# SSH to the VM (use gcloud compute tpus tpu-vm ssh for TPU, gcloud compute ssh for GPU)
-# Then run:
+gsutil cp scripts/run_backend.sh scripts/env.sh scripts/predict.sh \
+  scripts/poll_squeue.sh scripts/watch_triggers.sh gs://wz-nih-demo-shared/scripts/
 
-# Install Docker (GPU VMs only — TPU VMs have it pre-installed)
-curl -fsSL https://get.docker.com | sudo sh
-
-# Auth for Artifact Registry
-sudo mkdir -p /root/.docker
-echo '{"credHelpers":{"us-east5-docker.pkg.dev":"gcloud"}}' | sudo tee /root/.docker/config.json
-
-# Pull container
-sudo docker pull us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-compute:latest
-
-# Set hostname to match Slurm nodeset name
-sudo hostnamectl set-hostname nihprotein-tpuv6eeast5a-0  # or nihprotein-a100spotcentra-0
-
-# Run container
-sudo docker run -d --privileged --net=host --name=slurmd \
-  --hostname=$(hostname) --entrypoint=/usr/bin/systemd \
-  --restart unless-stopped \
-  us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-compute:latest
-
-# Copy munge key (must match biowulf-controller's key)
-gsutil cat gs://wz-nih-demo-shared/munge.key.b64 | base64 -d > /tmp/munge.key
-sudo docker cp /tmp/munge.key slurmd:/etc/munge/munge.key
-
-# Configure slurmd inside container
-sudo docker exec slurmd bash -c '
-chown munge:munge /etc/munge/munge.key; chmod 400 /etc/munge/munge.key
-echo SLURMD_OPTIONS=--conf-server=172.16.0.2:6820 > /etc/default/slurmd
-
-# Create the submitting user (must match controller OS Login UID)
-groupadd -g 1015145168 admin_williszhang_altostrat_com 2>/dev/null || true
-useradd -u 1015145168 -g 1015145168 -m admin_williszhang_altostrat_com 2>/dev/null || true
-
-# Prolog: stages job scripts from GCS at job start
-mkdir -p /slurm/custom_scripts/prolog.d
-cat > /slurm/custom_scripts/prolog.d/stage_scripts.sh << "PROLOG"
-#!/bin/bash
-mkdir -p /tmp/protein-demo
-gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh /tmp/protein-demo/
-gsutil -q cp gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/
-chmod +x /tmp/protein-demo/run_backend.sh
-PROLOG
-chmod +x /slurm/custom_scripts/prolog.d/stage_scripts.sh
-
-systemctl restart munge
-systemctl restart slurmd
-'
+gcloud compute scp scripts/*.sh local-controller/server.py \
+  biowulf-controller:/opt/protein-demo/ \
+  --zone=us-east5-a --project=wz-nih-demo-controller
 ```
 
-### 3. Register each node on biowulf-controller
+### 2. Restart services on controller
 
 ```bash
-gcloud compute ssh biowulf-controller --zone=us-east5-a --project=wz-nih-demo-controller --tunnel-through-iap
-
-# Add hostname → IP mapping
-echo '10.202.0.14 nihprotein-tpuv6eeast5a-0' | sudo tee -a /etc/hosts
-echo '10.128.0.39 nihprotein-a100spotcentra-0' | sudo tee -a /etc/hosts
-
-# Register with Slurm
-sudo scontrol update NodeName=nihprotein-tpuv6eeast5a-0 NodeAddr=10.202.0.14 State=IDLE
-sudo scontrol update NodeName=nihprotein-a100spotcentra-0 NodeAddr=10.128.0.39 State=IDLE
-
-# Verify
-sinfo  # Should show nodes as "idle" (not "idle~")
+gcloud compute ssh biowulf-controller --zone=us-east5-a --project=wz-nih-demo-controller --command="
+  sudo systemctl restart trigger-watcher poll-squeue
+  pkill -f 'python server.py' || true; sleep 2
+  cd /opt/protein-demo && nohup /opt/protein-demo/venv/bin/python server.py > /tmp/server.log 2>&1 &
+"
 ```
 
-### 4. Upload job scripts to GCS
+### 3. Verify Slurm nodes
 
 ```bash
-gsutil cp scripts/run_backend.sh scripts/env.sh gs://wz-nih-demo-shared/scripts/
+gcloud compute ssh biowulf-controller --zone=us-east5-a --project=wz-nih-demo-controller \
+  --command="sinfo -N -l | grep idle"
+```
+
+4 nodes should show `idle` (guaranteed, pre-warmed). Spot nodes show `idle~` (cloud, will auto-provision on demand).
+
+### 4. Start IAP tunnel for server.py
+
+```bash
+gcloud compute start-iap-tunnel biowulf-controller 8080 \
+  --local-host-port=localhost:8080 \
+  --zone=us-east5-a --project=wz-nih-demo-controller
 ```
 
 ### 5. Start frontend
 
 ```bash
 cd local-controller/frontend
-npm install
-echo "VITE_STATE_SERVER=https://protein-demo-server-212183265679.us-east5.run.app" > .env
-npx vite --port 5174 --host 0.0.0.0
+echo "VITE_STATE_SERVER=http://localhost:8080" > .env.local
+npm run dev
 ```
 
 ### 6. Press Enter
 
-## Key Infrastructure Details
-
-### Slurm Config (biowulf-controller)
-
-These settings are required for cross-project burst with cgroup v2 compute nodes:
-
-```
-ProctrackType=proctrack/linuxproc    # not cgroup (v1 only binary)
-JobAcctGatherType=jobacct_gather/linux
-TaskPlugin=task/affinity             # remove task/cgroup
-SlurmctldHost=biowulf-controller(172.16.0.2)
-SlurmctldPort=6820-6830
-```
-
-`cgroup.conf`:
-```
-CgroupPlugin=cgroup/v1
-ConstrainCores=no
-ConstrainRamSpace=no
-```
-
-### GCS Cluster Config (gs://slurm-nihprotein6e309/nihprotein-files/config.yaml)
-
-```yaml
-slurm_control_host: "172.16.0.2"     # raw IP, not hostname
-slurm_control_addr: null              # avoids host(addr):port format
-disable_default_mounts: true          # no /home, /opt/apps NFS
-network_storage: []                   # no gcsfuse
-munge_mount: {server_ip: "10.202.0.7", ...}   # nihprotein-controller NFS
-slurm_key_mount: {server_ip: "10.202.0.7", ...}
-docker_image: us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-compute:latest
-```
-
-### Cross-Project IAM
-
-Controller SA (`281348638866-compute@developer.gserviceaccount.com`) needs on burst project:
-- `roles/tpu.admin`
-- `roles/compute.instanceAdmin.v1`
-- `roles/storage.objectAdmin`
-- `roles/iam.serviceAccountUser` on burst default SA
-
-### Container Image
-
-Built from `containers/Dockerfile.slurm-compute`. Includes systemd, slurmd 25.05.6, munge, gcloud CLI, Python venv. Slurm binary tarball at `gs://wz-nih-demo-shared/slurm-25.05-bin.tar.gz`.
+## Setting Up a New Compute Node
 
 ```bash
-cd containers
-gsutil cp gs://wz-nih-demo-shared/slurm-25.05-bin.tar.gz .
-cp Dockerfile.slurm-compute Dockerfile
-gcloud builds submit --tag=us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-compute:latest \
-  --project=wz-nih-demo-burst --region=us-east5 .
+# SSH to the VM
+# Install Docker if needed
+sudo apt-get update -qq && sudo apt-get install -y -qq docker.io
+sudo systemctl start docker
+
+# Pull and run the Slurm container
+sudo gcloud auth configure-docker us-east5-docker.pkg.dev --quiet
+sudo docker pull us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-compute:latest
+sudo docker run -d --name slurmd --privileged --net=host --restart=always \
+  us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-compute:latest
+
+# Start slurmd (container init downloads munge key, starts systemd)
+sleep 10
+sudo docker exec slurmd bash -c 'slurmd --conf-server=172.16.0.2:6820 -N <SLURM_NODE_NAME> &'
 ```
+
+## Slurm Config
+
+`/etc/slurm/cloud.conf` on biowulf-controller. Edit and run `sudo scontrol reconfigure`.
+
+`/etc/slurm/slurm.conf` critical settings:
+```
+ProctrackType=proctrack/linuxproc
+JobAcctGatherType=jobacct_gather/linux
+TaskPlugin=task/affinity
+SlurmctldHost=biowulf-controller(172.16.0.2)
+```
+
+GCS nodeset configs: `gs://slurm-nihprotein6e309/nihprotein-files/nodeset_configs/`
+
+## Troubleshooting
+
+- **Jobs fail ExitCode=1**: `HOME=/tmp` missing in sbatch --wrap. Docker containers don't have the submitting user's home dir.
+- **No backend events**: Burst compute SA needs `storage.objectAdmin` on `gs://wz-nih-demo-shared`.
+- **Node `idle~`**: slurmd not running. SSH → `docker exec slurmd ps aux | grep slurmd`.
+- **TPU VM name mismatch**: run_backend.sh uses `SLURMD_NODENAME`, not GCE metadata instance name.
+- **Stale GCS data**: predict.sh clears `job/` on each submit. If frontend polls stale data, clean manually: `gsutil -m rm -r gs://wz-nih-demo-shared/job`.
 
 ## Files
 
 ```
 scripts/
-  predict.sh             # sbatch entrypoint (controller)
-  run_backend.sh         # per-backend job (compute node, staged from GCS)
-  env.sh                 # project IDs, pricing
-  deploy_controller.sh   # one-shot controller setup
-  watch_triggers.sh      # GCS trigger watcher (systemd service)
-  poll_squeue.sh         # streams Slurm events to GCS
+  predict.sh             # sbatch entrypoint — dispatches 6 jobs
+  run_backend.sh         # per-backend job — writes structured events to GCS
+  env.sh                 # project IDs, pricing constants
+  watch_triggers.sh      # GCS trigger watcher (systemd: trigger-watcher.service)
+  poll_squeue.sh         # slurmctld event scraper (systemd: poll-squeue.service)
 
 local-controller/
-  server.py              # Cloud Run: POST /api/submit writes GCS trigger
-  Dockerfile             # Cloud Run container
-  frontend/              # React HUD
+  server.py              # Flask: POST /api/submit writes trigger blob
+  frontend/              # React HUD (Vite)
 
 containers/
-  Dockerfile.slurm-compute  # Slurm compute container
-  slurmd.service             # systemd units for container
-  sackd.service
-  slurmcmd.timer/service
-
-backends/
-  {af2,esmfold,boltz2}-{tpu,gpu}/predict.py  # ML inference (staged from GCS)
+  Dockerfile.slurm-compute  # Slurm compute container (systemd + slurmd + gsutil)
 ```
