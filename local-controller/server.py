@@ -1,22 +1,17 @@
-"""State server — GCS polling proxy for the protein demo frontend.
+"""State server — GCS proxy for the protein demo frontend.
 
-Reads job state from GCS blobs written by run_backend.sh.
-Optionally triggers new runs via sbatch (or direct shell).
+All state lives in gs://BUCKET/job/ (flat, no run subfolders).
+The frontend reads directly from GCS for events and backend blobs.
+This server only handles submit (writes a trigger blob to GCS).
 
 Endpoints:
-  POST /api/submit          — start a new run (6 backends)
-  GET  /api/status/<run_id> — poll all 6 backend states for a run
-  GET  /api/latest          — find the most recent run_id
-  GET  /api/runs            — list all runs
-
-Requires: pip install flask flask-cors google-cloud-storage
-Run: python local-controller/server.py
+  POST /api/submit  — start a new run (writes trigger, predict.sh fires)
+  GET  /api/status  — poll all 6 backend states
+  GET  /api/health  — liveness check
 """
 
 import json
 import os
-import subprocess
-import time
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request
@@ -27,11 +22,7 @@ app = Flask(__name__)
 CORS(app)
 
 BUCKET_NAME = os.environ.get("STATE_BUCKET", "wz-nih-demo-shared")
-JOBS_PREFIX = "jobs/"
-PREDICT_SCRIPT = "/opt/protein-demo/predict.sh"
-CONTROLLER_VM = os.environ.get("CONTROLLER_VM", "biowulf-controller")
-CONTROLLER_ZONE = os.environ.get("CONTROLLER_ZONE", "us-east5-a")
-CONTROLLER_PROJECT = os.environ.get("CONTROLLER_PROJECT", "wz-nih-demo-controller")
+JOB_PREFIX = "job/"
 
 ALL_BACKENDS = [
     "af2-tpu", "af2-gpu",
@@ -52,126 +43,57 @@ def get_bucket():
     return get_client().bucket(BUCKET_NAME)
 
 
-@app.route("/api/submit", methods=["POST"])
-def submit():
-    """Start a new prediction run. Returns {run_id}."""
-    data = request.json or {}
-    protein_id = data.get("protein_id", "hemoglobin")
-
-    # If a run exists and isn't finished, show it — don't resubmit
-    latest = _find_latest_run()
-    if latest and not latest.get("all_complete"):
-        return jsonify({
-            "run_id": latest["run_id"],
-            "already_running": True,
-        })
-
-    # If the previous run IS finished, clean it out before starting fresh
-    if latest and latest.get("all_complete"):
-        _delete_run(latest["run_id"])
-
-    # Write a trigger blob to GCS. The controller VM watches for these
-    # and runs predict.sh when one appears.
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+def _read_job_state():
     bucket = get_bucket()
-    trigger = {
-        "run_id": run_id,
-        "protein_id": protein_id,
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
-    }
-    bucket.blob(f"triggers/{run_id}.json").upload_from_string(
-        json.dumps(trigger, indent=2), content_type="application/json"
-    )
-
-    return jsonify({
-        "run_id": run_id,
-        "already_running": False,
-        "dispatch_lines": [f"Trigger written to gs://{BUCKET_NAME}/triggers/{run_id}.json"],
-    })
-
-
-@app.route("/api/status/<run_id>")
-def status(run_id):
-    """Poll all backend states for a run. Returns {run_id, lanes, all_complete}."""
-    bucket = get_bucket()
-    prefix = f"{JOBS_PREFIX}{run_id}/"
-
     lanes = {}
-    for backend_id in ALL_BACKENDS:
-        blob = bucket.blob(f"{prefix}{backend_id}.json")
+    for bid in ALL_BACKENDS:
+        blob = bucket.blob(f"{JOB_PREFIX}{bid}.json")
         if blob.exists():
             try:
-                content = json.loads(blob.download_as_text())
-                lanes[backend_id] = content
+                lanes[bid] = json.loads(blob.download_as_text())
             except json.JSONDecodeError:
-                lanes[backend_id] = {"backend_id": backend_id, "run_id": run_id, "state": "idle"}
+                lanes[bid] = {"backend_id": bid, "state": "idle"}
         else:
-            lanes[backend_id] = {
-                "backend_id": backend_id,
-                "run_id": run_id,
-                "state": "idle",
-            }
+            lanes[bid] = {"backend_id": bid, "state": "idle"}
 
-    all_complete = all(
+    all_idle = all(lanes[b].get("state") == "idle" for b in ALL_BACKENDS)
+    all_complete = not all_idle and all(
         lanes[b].get("state") in ("done", "failed")
         for b in ALL_BACKENDS
     )
+    return lanes, all_complete, all_idle
 
-    # Read manifest for metadata
-    manifest_blob = bucket.blob(f"{prefix}manifest.json")
-    manifest = {}
-    if manifest_blob.exists():
-        manifest = json.loads(manifest_blob.download_as_text())
 
-    # If all complete, update manifest status
-    if all_complete and manifest.get("status") == "running":
-        manifest["status"] = "complete"
-        manifest["completed_at"] = datetime.now(timezone.utc).isoformat()
-        manifest_blob.upload_from_string(json.dumps(manifest, indent=2))
+@app.route("/api/submit", methods=["POST"])
+def submit():
+    data = request.json or {}
+    protein_id = data.get("protein_id", "hemoglobin")
 
+    lanes, all_complete, all_idle = _read_job_state()
+
+    if not all_idle and not all_complete:
+        return jsonify({"already_running": True})
+
+    bucket = get_bucket()
+    trigger = {
+        "protein_id": protein_id,
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    trigger_name = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    bucket.blob(f"triggers/{trigger_name}.json").upload_from_string(
+        json.dumps(trigger), content_type="application/json"
+    )
+
+    return jsonify({"already_running": False})
+
+
+@app.route("/api/status")
+def status():
+    lanes, all_complete, all_idle = _read_job_state()
     return jsonify({
-        "run_id": run_id,
         "lanes": lanes,
         "all_complete": all_complete,
-        "manifest": manifest,
     })
-
-
-@app.route("/api/latest")
-def latest():
-    """Find the most recent run. Returns {run_id, lanes, all_complete} or {run_id: null}."""
-    result = _find_latest_run()
-    if result is None:
-        return jsonify({"run_id": None})
-    return jsonify(result)
-
-
-@app.route("/api/runs")
-def runs():
-    """List all runs with their manifest metadata."""
-    bucket = get_bucket()
-    blobs = bucket.list_blobs(prefix=JOBS_PREFIX, delimiter="/")
-
-    # list_blobs with delimiter returns prefixes for "directories"
-    run_ids = []
-    for page in blobs.pages:
-        for prefix in page.prefixes:
-            run_id = prefix.replace(JOBS_PREFIX, "").rstrip("/")
-            if run_id:
-                run_ids.append(run_id)
-
-    # Sort by run_id (which is a timestamp, so lexicographic = chronological)
-    run_ids.sort(reverse=True)
-
-    result = []
-    for run_id in run_ids[:20]:
-        manifest_blob = bucket.blob(f"{JOBS_PREFIX}{run_id}/manifest.json")
-        manifest = {}
-        if manifest_blob.exists():
-            manifest = json.loads(manifest_blob.download_as_text())
-        result.append({"run_id": run_id, **manifest})
-
-    return jsonify({"runs": result})
 
 
 @app.route("/api/health")
@@ -179,61 +101,8 @@ def health():
     return jsonify({"status": "ok", "bucket": BUCKET_NAME})
 
 
-def _delete_run(run_id: str):
-    """Remove all blobs for a completed run."""
-    bucket = get_bucket()
-    blobs = list(bucket.list_blobs(prefix=f"{JOBS_PREFIX}{run_id}/"))
-    for blob in blobs:
-        blob.delete()
-
-
-def _find_latest_run():
-    """Find the most recent run_id and return its status."""
-    bucket = get_bucket()
-    blobs = bucket.list_blobs(prefix=JOBS_PREFIX, delimiter="/")
-
-    run_ids = []
-    for page in blobs.pages:
-        for prefix in page.prefixes:
-            run_id = prefix.replace(JOBS_PREFIX, "").rstrip("/")
-            if run_id:
-                run_ids.append(run_id)
-
-    if not run_ids:
-        return None
-
-    run_ids.sort(reverse=True)
-    latest_id = run_ids[0]
-
-    # Build lane states
-    lanes = {}
-    prefix = f"{JOBS_PREFIX}{latest_id}/"
-    for backend_id in ALL_BACKENDS:
-        blob = bucket.blob(f"{prefix}{backend_id}.json")
-        if blob.exists():
-            try:
-                lanes[backend_id] = json.loads(blob.download_as_text())
-            except json.JSONDecodeError:
-                lanes[backend_id] = {"backend_id": backend_id, "state": "idle"}
-        else:
-            lanes[backend_id] = {"backend_id": backend_id, "state": "idle"}
-
-    all_complete = all(
-        lanes[b].get("state") in ("done", "failed")
-        for b in ALL_BACKENDS
-    )
-
-    return {
-        "run_id": latest_id,
-        "lanes": lanes,
-        "all_complete": all_complete,
-    }
-
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     print(f"State server starting on port {port}")
     print(f"Bucket: {BUCKET_NAME}")
-    print(f"Controller VM: {CONTROLLER_VM} ({CONTROLLER_ZONE}, {CONTROLLER_PROJECT})")
-    print(f"Predict script: {PREDICT_SCRIPT}")
     app.run(host="0.0.0.0", port=port, debug=True)

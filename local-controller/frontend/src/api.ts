@@ -4,13 +4,7 @@ const STATE_SERVER = (import.meta as any).env?.VITE_STATE_SERVER || 'http://loca
 const GCS_BUCKET = 'wz-nih-demo-shared'
 const GCS_BASE = `https://storage.googleapis.com/${GCS_BUCKET}`
 
-export interface SubmitResult {
-  run_id: string
-  already_running: boolean
-  dispatch_lines?: string[]
-}
-
-export async function submitRun(proteinId: string): Promise<SubmitResult> {
+export async function submitRun(proteinId: string): Promise<{ already_running: boolean }> {
   const resp = await fetch(`${STATE_SERVER}/api/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -20,15 +14,8 @@ export async function submitRun(proteinId: string): Promise<SubmitResult> {
   return resp.json()
 }
 
-export interface RunStatus {
-  run_id: string
-  lanes: Record<string, LaneStatusBlob>
-  all_complete: boolean
-}
-
 export interface LaneStatusBlob {
   backend_id: string
-  run_id: string
   state: string
   started_at?: string
   completed_at?: string | null
@@ -45,6 +32,25 @@ export interface LaneStatusBlob {
   error?: string | null
 }
 
+export interface SlurmEvent {
+  ts: string
+  type: string
+  msg: string
+  backend?: string
+  vm?: string | null
+  zone?: string
+  region?: string
+  partition?: string
+  project?: string
+  nodeset?: string
+  job_id?: string
+  elapsed_ms?: number
+  cost?: number
+  protein_id?: string
+  seq_len?: number
+  error?: string
+}
+
 const ALL_BACKENDS: BackendId[] = [
   'af2-tpu', 'af2-gpu', 'esmfold-tpu', 'esmfold-gpu', 'boltz2-tpu', 'boltz2-gpu',
 ]
@@ -55,35 +61,37 @@ async function fetchGcsJson(path: string): Promise<any | null> {
   return resp.json()
 }
 
-export async function pollStatus(runId: string): Promise<RunStatus> {
+export interface JobStatus {
+  lanes: Record<string, LaneStatusBlob>
+  all_complete: boolean
+}
+
+export async function pollStatus(): Promise<JobStatus> {
   const lanes: Record<string, LaneStatusBlob> = {}
 
   const results = await Promise.all(
     ALL_BACKENDS.map(async (bid) => {
-      const blob = await fetchGcsJson(`jobs/${runId}/${bid}.json`)
+      const blob = await fetchGcsJson(`job/${bid}.json`)
       return { bid, blob }
     })
   )
 
+  let anyNonIdle = false
   for (const { bid, blob } of results) {
-    lanes[bid] = blob || { backend_id: bid, run_id: runId, state: 'idle' }
+    lanes[bid] = blob || { backend_id: bid, state: 'idle' }
+    if (lanes[bid].state !== 'idle') anyNonIdle = true
   }
 
-  const all_complete = ALL_BACKENDS.every(
+  const all_complete = anyNonIdle && ALL_BACKENDS.every(
     b => lanes[b]?.state === 'done' || lanes[b]?.state === 'failed'
   )
 
-  return { run_id: runId, lanes, all_complete }
+  return { lanes, all_complete }
 }
 
-export interface SlurmEvent {
-  ts: string
-  msg: string
-}
-
-export async function pollEvents(runId: string): Promise<SlurmEvent[]> {
+export async function pollEvents(): Promise<SlurmEvent[]> {
   const listResp = await fetch(
-    `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o?prefix=jobs/${runId}/log/&delimiter=/&t=${Date.now()}`,
+    `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o?prefix=job/log/&delimiter=/&t=${Date.now()}`,
     { cache: 'no-store' }
   )
   if (!listResp.ok) return []
@@ -99,27 +107,6 @@ export async function pollEvents(runId: string): Promise<SlurmEvent[]> {
   ).then(results => results.filter(Boolean) as SlurmEvent[])
 
   return events
-}
-
-export async function getLatestRun(): Promise<RunStatus | null> {
-  const resp = await fetch(
-    `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o?prefix=jobs/&delimiter=/`,
-    { cache: 'no-store' }
-  )
-  if (!resp.ok) return null
-  const data = await resp.json()
-
-  const prefixes: string[] = data.prefixes || []
-  if (prefixes.length === 0) return null
-
-  const runIds = prefixes
-    .map((p: string) => p.replace('jobs/', '').replace('/', ''))
-    .filter(Boolean)
-    .sort()
-    .reverse()
-
-  const latestId = runIds[0]
-  return pollStatus(latestId)
 }
 
 export function blobToLaneStatus(blob: LaneStatusBlob, backendId: BackendId): Partial<LaneStatus> {
