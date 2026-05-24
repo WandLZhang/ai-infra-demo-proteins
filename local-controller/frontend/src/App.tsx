@@ -347,15 +347,15 @@ export default function App() {
       {/* Side ladder — always visible, fills with values as backends complete */}
       <SideLadder lanes={lanes} onSelect={() => {}} />
 
-      {/* Location paper */}
-      <div className="location-paper">
-        <div className="location-paper-region" style={{ transition: 'opacity 0.8s ease' }}>
+      {/* Location paper — key forces remount on phase change, re-triggering locationAnim */}
+      <div className="location-paper" key={`loc-${phase}`}>
+        <div className="location-paper-region">
           {phase === 'home' ? 'BUILDING 12' : (selectedZone?.label || 'BIOWULF — MULTI-REGION BURST')}
         </div>
-        <div className="location-paper-name" style={{ transition: 'opacity 0.8s ease' }}>
+        <div className="location-paper-name">
           {phase === 'home' ? 'NIH BETHESDA' : currentProtein.name.toUpperCase()}
         </div>
-        <div className="location-paper-coords" style={{ transition: 'opacity 0.8s ease' }}>
+        <div className="location-paper-coords">
           {phase === 'home'
             ? 'Lat: 38.9988, Lng: -77.1020 | Biowulf HPC'
             : `${currentProtein.uniprotId} · ${currentProtein.residueCount} AA`}
