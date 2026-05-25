@@ -18,6 +18,7 @@ from typing import Any
 
 # ── Patch 1: Eager mode (240x speedup over graph mode) ──────────────────────
 os.environ.setdefault("PJRT_DEVICE", "TPU")
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import torch_xla
 torch_xla.experimental.eager_mode(True)
 import torch_xla.core.xla_model as xm
