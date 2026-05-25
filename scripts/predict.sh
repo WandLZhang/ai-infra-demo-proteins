@@ -69,7 +69,7 @@ wait
 
 build_wrap() {
   local BACKEND="$1"
-  echo "export HOME=/tmp; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo; gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
+  echo "export HOME=/tmp; ulimit -l unlimited 2>/dev/null; mkdir -p /tmp/tpu_logs 2>/dev/null; chmod 777 /tmp/tpu_logs 2>/dev/null; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo; gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
 }
 
 # ── Phase 1: Submit all to Spot partitions ──
