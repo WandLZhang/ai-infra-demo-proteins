@@ -84,7 +84,7 @@ def predict_structure(sequence: str) -> dict[str, Any]:
         "plddt_max": float(plddt.max()),
         "solve_time_ms": elapsed_ms,
         "device_kind": f"TPU ({str(state.device)})",
-        "num_devices": xm.xrt_world_size(),
+        "num_devices": 1,
         "seq_len": seq_len,
         "model": "ESMFold",
     }

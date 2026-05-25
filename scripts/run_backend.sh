@@ -121,7 +121,15 @@ update_state "inferring"
 RESULT_DIR="/tmp/result-${BACKEND_ID}"
 mkdir -p "$RESULT_DIR"
 
-PREDICT_SCRIPT="$SCRIPT_DIR/../backends/$BACKEND_ID/predict.py"
+# predict.py baked into the container at /opt/backends/$BACKEND_ID/predict.py
+# Fallback: downloaded from GCS to /tmp/protein-demo/backends/$BACKEND_ID/predict.py
+PREDICT_SCRIPT="/opt/backends/$BACKEND_ID/predict.py"
+if [[ ! -f "$PREDICT_SCRIPT" ]]; then
+  PREDICT_SCRIPT="$SCRIPT_DIR/../backends/$BACKEND_ID/predict.py"
+fi
+if [[ ! -f "$PREDICT_SCRIPT" ]]; then
+  PREDICT_SCRIPT="/tmp/protein-demo/backends/$BACKEND_ID/predict.py"
+fi
 
 if [[ -f "$PREDICT_SCRIPT" ]]; then
   set +e
