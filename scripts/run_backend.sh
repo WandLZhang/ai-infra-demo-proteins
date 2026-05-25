@@ -142,12 +142,12 @@ if [[ -f "$PREDICT_SCRIPT" ]]; then
   fi
   set -e
 
-  if [[ $EXIT_CODE -ne 0 ]]; then
+  # Check for output files even if exit code is non-zero (Boltz writer may crash after producing CIF)
+  OUTPUT_FILE=$(find "$RESULT_DIR" -name "*.pdb" -o -name "*.cif" 2>/dev/null | head -1)
+  if [[ $EXIT_CODE -ne 0 && -z "$OUTPUT_FILE" ]]; then
     update_state "failed" "predict.py exited with code $EXIT_CODE"
     exit 1
   fi
-
-  OUTPUT_FILE=$(find "$RESULT_DIR" -name "*.pdb" -o -name "*.cif" 2>/dev/null | head -1)
   if [[ -z "$OUTPUT_FILE" ]]; then
     update_state "failed" "No PDB/CIF output produced"
     exit 1
