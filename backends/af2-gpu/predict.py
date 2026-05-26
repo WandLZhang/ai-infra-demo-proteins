@@ -126,11 +126,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AlphaFold2 GPU inference")
     parser.add_argument("fasta", help="Input FASTA file")
     parser.add_argument("--out-dir", default="/tmp/af2_gpu_out")
+    parser.add_argument("--protein-id", default=None, help="Protein ID for features lookup")
     args = parser.parse_args()
 
-    with open(args.fasta) as f:
-        header = f.readline().strip()
-    protein_id = header.lstrip(">").split("|")[0].strip().lower()
+    if args.protein_id:
+        protein_id = args.protein_id
+    else:
+        with open(args.fasta) as f:
+            header = f.readline().strip()
+        protein_id = header.lstrip(">").split("|")[0].strip().lower()
 
     features_path = _download_features(protein_id)
     os.makedirs(args.out_dir, exist_ok=True)

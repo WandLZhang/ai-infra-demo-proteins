@@ -133,11 +133,15 @@ fi
 
 if [[ -f "$PREDICT_SCRIPT" ]]; then
   set +e
+  EXTRA_ARGS=""
+  if [[ "$MODEL" == "af2" ]]; then
+    EXTRA_ARGS="--protein-id $PROTEIN_ID"
+  fi
   if [[ "$SILICON" == "tpu" ]]; then
-    PJRT_DEVICE=TPU python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" 2>&1 | tee "/tmp/${BACKEND_ID}.log"
+    PJRT_DEVICE=TPU python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" $EXTRA_ARGS 2>&1 | tee "/tmp/${BACKEND_ID}.log"
     EXIT_CODE=$?
   else
-    python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" 2>&1 | tee "/tmp/${BACKEND_ID}.log"
+    python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" $EXTRA_ARGS 2>&1 | tee "/tmp/${BACKEND_ID}.log"
     EXIT_CODE=$?
   fi
   set -e
