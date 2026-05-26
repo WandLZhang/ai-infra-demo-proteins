@@ -19,6 +19,10 @@ RUN pip install --no-cache-dir \
 # AlphaFold 2.3.x from GitHub
 RUN pip install --no-cache-dir git+https://github.com/google-deepmind/alphafold.git@v2.3.2
 
+# Pre-create writable dirs for AF2 params cache
+RUN mkdir -p /var/cache/alphafold-params/params /tmp/af2-features && \
+    chmod -R 777 /var/cache/alphafold-params /tmp/af2-features
+
 # Create slurm user
 RUN groupadd -g 1015145168 slurmuser 2>/dev/null || true && \
     useradd -u 1015145168 -g 1015145168 --no-create-home --no-log-init slurmuser 2>/dev/null || true
