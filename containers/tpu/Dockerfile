@@ -4,16 +4,21 @@ FROM us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-compute:latest
 RUN apt-get update -qq && apt-get install -y -qq git libpython3.10 && rm -rf /var/lib/apt/lists/*
 
 # ML deps for all TPU backends
+# Install torch_xla first (brings libtpu 0.0.21)
 RUN pip install --no-cache-dir \
     "torch==2.9.0" \
     "torch_xla[tpu]==2.9.0" \
-    "jax[tpu]==0.4.38" \
+    -f https://storage.googleapis.com/libtpu-releases/index.html
+
+# Install jax WITHOUT tpu extra (avoid libtpu conflict), use existing libtpu
+RUN pip install --no-cache-dir "jax==0.4.38" "jaxlib==0.4.38"
+
+# ML libraries
+RUN pip install --no-cache-dir \
     transformers \
     "boltz==2.0.3" \
     pytorch-lightning \
-    google-cloud-storage \
-    -f https://storage.googleapis.com/libtpu-releases/index.html \
-    -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+    google-cloud-storage
 
 # AlphaFold 2.3.x from GitHub
 RUN pip install --no-cache-dir git+https://github.com/google-deepmind/alphafold.git@v2.3.2
