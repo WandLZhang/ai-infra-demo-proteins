@@ -38,7 +38,7 @@ _MODEL_NAME = "model_1"
 # Where the AlphaFold params live in our shared GCS bucket. We pre-stage
 # alphafold/params/params_model_1.npz once at deployment time.
 _PARAMS_BUCKET = os.environ.get("SHARED_BUCKET", "wz-nih-demo-shared").replace("gs://", "")
-_PARAMS_BLOB = "alphafold-params/params_model_1.npz"
+_PARAMS_BLOB = "af2_params/params/params_model_1.npz"
 
 # Local cache so we only download params once per pod lifetime
 _LOCAL_PARAMS_DIR = Path("/var/cache/alphafold-params")
