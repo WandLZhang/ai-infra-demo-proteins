@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+os.environ["JAX_PLATFORMS"] = "cpu"
 import jax
 import numpy as np
 
