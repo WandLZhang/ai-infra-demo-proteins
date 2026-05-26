@@ -34,6 +34,9 @@ RUN groupadd -g 1015145168 slurmuser 2>/dev/null || true && \
     useradd -u 1015145168 -g 1015145168 --no-create-home --no-log-init slurmuser 2>/dev/null || true
 
 # Bake in predict.py files
+# Script to stop tpu-runtime on the host (prevents VFIO conflict)
+RUN echo '#!/bin/bash\ndocker update --restart=no tpu-runtime 2>/dev/null; docker stop tpu-runtime 2>/dev/null; exit 0' > /opt/stop-tpu-runtime.sh && chmod +x /opt/stop-tpu-runtime.sh
+
 COPY backends/af2-tpu/predict.py /opt/backends/af2-tpu/predict.py
 COPY backends/esmfold-tpu/predict.py /opt/backends/esmfold-tpu/predict.py
 COPY backends/boltz2-tpu/predict.py /opt/backends/boltz2-tpu/predict.py

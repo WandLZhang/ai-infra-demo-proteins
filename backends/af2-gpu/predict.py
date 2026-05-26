@@ -21,7 +21,7 @@ from alphafold.model import config, data, model
 from google.cloud import storage
 
 _MODEL_NAME = "model_1"
-_PARAMS_BUCKET = os.environ.get("SHARED_BUCKET", "wz-nih-demo-shared")
+_PARAMS_BUCKET = os.environ.get("SHARED_BUCKET", "wz-nih-demo-shared").replace("gs://", "")
 _PARAMS_BLOB = "alphafold-params/params_model_1.npz"
 _LOCAL_PARAMS_DIR = Path("/var/cache/alphafold-params")
 
