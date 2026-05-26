@@ -82,12 +82,17 @@ def predict_structure(features_pkl_path: str) -> dict[str, Any]:
     prediction = state.model_runner.predict(processed, random_seed=0)
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-    unrelaxed_protein = protein.from_prediction(
-        features=processed,
-        result=prediction,
-        b_factors=np.repeat(prediction["plddt"][:, None], 37, axis=-1),
-        remove_leading_feature_dim=False,
-    )
+    try:
+        unrelaxed_protein = protein.from_prediction(
+            features=processed, result=prediction,
+            b_factors=np.repeat(prediction["plddt"][:, None], 37, axis=-1),
+            remove_leading_feature_dim=False,
+        )
+    except TypeError:
+        unrelaxed_protein = protein.from_prediction(
+            features=processed, result=prediction,
+            b_factors=np.repeat(prediction["plddt"][:, None], 37, axis=-1),
+        )
     pdb_str = protein.to_pdb(unrelaxed_protein)
 
     return {
