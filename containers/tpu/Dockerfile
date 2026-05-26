@@ -28,7 +28,7 @@ RUN chmod -R a+w /usr/local/lib/python3.10/dist-packages/boltz/ 2>/dev/null || t
 
 # Create slurm user for non-root job execution
 RUN groupadd -g 1015145168 slurmuser 2>/dev/null || true && \
-    useradd -u 1015145168 -g 1015145168 -m -d /tmp/slurmhome slurmuser 2>/dev/null || true
+    useradd -u 1015145168 -g 1015145168 --no-create-home --no-log-init slurmuser 2>/dev/null || true
 
 # Bake in predict.py files
 COPY backends/af2-tpu/predict.py /opt/backends/af2-tpu/predict.py
