@@ -37,8 +37,9 @@ _state: ModelState | None = None
 
 
 def _download_params() -> Path:
-    _LOCAL_PARAMS_DIR.mkdir(parents=True, exist_ok=True)
-    local_path = _LOCAL_PARAMS_DIR / "params_model_1.npz"
+    params_subdir = _LOCAL_PARAMS_DIR / "params"
+    params_subdir.mkdir(parents=True, exist_ok=True)
+    local_path = params_subdir / "params_model_1.npz"
     if local_path.exists() and local_path.stat().st_size > 0:
         return local_path
 
@@ -59,7 +60,7 @@ def load_model() -> ModelState:
     print(f"[af2-gpu] JAX devices: {[d.device_kind for d in devices]}")
 
     params_path = _download_params()
-    model_params = data.get_model_haiku_params(model_name=_MODEL_NAME, data_dir=str(params_path.parent.parent))
+    model_params = data.get_model_haiku_params(model_name=_MODEL_NAME, data_dir=str(_LOCAL_PARAMS_DIR))
 
     model_config = config.model_config(_MODEL_NAME)
     model_config.model.num_recycle = 1
