@@ -10,8 +10,8 @@ RUN pip install --no-cache-dir \
     "torch_xla[tpu]==2.9.0" \
     -f https://storage.googleapis.com/libtpu-releases/index.html
 
-# Install jax WITHOUT tpu extra (avoid libtpu conflict), use existing libtpu
-RUN pip install --no-cache-dir "jax==0.4.38" "jaxlib==0.4.38"
+# Install jax[tpu] from libtpu releases (gets libtpu 0.0.7 + nightly — compatible with BOTH jax 0.4.38 AND torch_xla 2.9)
+RUN pip install --no-cache-dir "jax[tpu]==0.4.38" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
 # ML libraries
 RUN pip install --no-cache-dir \
