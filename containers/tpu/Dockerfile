@@ -23,8 +23,9 @@ RUN pip install --no-cache-dir \
 # AlphaFold 2.3.x from GitHub
 RUN pip install --no-cache-dir git+https://github.com/google-deepmind/alphafold.git@v2.3.2
 
-# Pre-create writable dirs for TPU logs and runtime
-RUN mkdir -p /tmp/tpu_logs && chmod 777 /tmp/tpu_logs
+# Pre-create writable dirs for TPU logs, AF2 params cache, and runtime
+RUN mkdir -p /tmp/tpu_logs /var/cache/alphafold-params/params /tmp/af2-features && \
+    chmod -R 777 /tmp/tpu_logs /var/cache/alphafold-params /tmp/af2-features
 
 # Make boltz package writable for runtime monkey-patches
 RUN chmod -R a+w /usr/local/lib/python3.10/dist-packages/boltz/ 2>/dev/null || true
