@@ -19,7 +19,7 @@ const PROTEINS: Protein[] = [
 ]
 
 // UX phases: zoomed on Building 12 → terminal → submit → zoom out → catalog → catalog2 → results
-type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'pd1' | 'pd2' | 'img' | 'gen' | 'done'
+type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'pd1' | 'pd2' | 'img' | 'gen' | 'tpu1' | 'tpu2' | 'done'
 
 function initLaneStatus(backendId: BackendId): LaneStatus {
   const b = BACKENDS.find(b => b.id === backendId)!
@@ -44,12 +44,15 @@ export default function App() {
 
   const isMd = phase === 'md1' || phase === 'md2' || phase === 'md3'
   const isPd1 = phase === 'pd1'  // pd1 stays zoomed on us-central1 with Hyperdisk hub
+  const isTpu = phase === 'tpu1' || phase === 'tpu2'
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
     : isMd || isPd1
       ? { lat: 41.2588, lng: -95.8519 }    // us-central1 (Council Bluffs, IA)
-      : { lat: 39.5, lng: -98.35 }
-  const mapZoom = phase === 'home' ? 12 : isMd || isPd1 ? 6 : 5
+      : isTpu
+        ? { lat: 39.9623, lng: -83.0007 }  // us-east5 (Columbus, OH) — TPU east
+        : { lat: 39.5, lng: -98.35 }
+  const mapZoom = phase === 'home' ? 12 : isMd || isPd1 || isTpu ? 6 : 5
   const mdLayer: 'storage' | 'compute' | 'topology' | null =
     phase === 'md1' ? 'storage' :
     phase === 'md2' ? 'compute' :
@@ -279,11 +282,15 @@ export default function App() {
         else if (phase === 'pd1') setPhase('pd2')
         else if (phase === 'pd2') setPhase('img')
         else if (phase === 'img') setPhase('gen')
-        // 'gen' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
+        else if (phase === 'gen') setPhase('tpu1')
+        else if (phase === 'tpu1') setPhase('tpu2')
+        // 'tpu2' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
         // 'done' stays
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        if (phase === 'done') setPhase('gen')
+        if (phase === 'done') setPhase('tpu2')
+        else if (phase === 'tpu2') setPhase('tpu1')
+        else if (phase === 'tpu1') setPhase('gen')
         else if (phase === 'gen') setPhase('img')
         else if (phase === 'img') setPhase('pd2')
         else if (phase === 'pd2') setPhase('pd1')
@@ -439,6 +446,8 @@ export default function App() {
           phase === 'pd2' ? 'Consumption Models' :
           phase === 'img' ? 'Biomedical Image Analysis' :
           phase === 'gen' ? 'Genomics & Sequence Analysis' :
+          phase === 'tpu1' ? 'TPUs' :
+          phase === 'tpu2' ? 'Why TPU Economics Are Structural' :
           'Results'
         }
         sections={
@@ -477,10 +486,16 @@ export default function App() {
             { body: 'The background sbatch demo follows the Protein Design workload pattern, dispatching across consumption models:\n\n<ul style="margin: 8px 0; padding-left: 18px; list-style-type: none;"><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dws" target="_blank">DWS Flex Start</a> — <b>guaranteed GPU or TPU capacity for up to 7 days per request</b>, with no reservation contract or minimum commitment. AWS Capacity Blocks require fixed-duration commitment and rigid sizing. AWS also <a href="https://www.datacenterknowledge.com/cloud/aws-raises-h200-prices" target="_blank">raised H200 prices 15%</a> recently.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/compute/docs/instances/future-reservations-calendar-mode-overview" target="_blank">Calendar Mode</a> — pick a start date and lock in guaranteed capacity for <b>up to 90 days</b>. Useful for runs planned against grant milestones.</li><li style="margin-bottom: 0; padding-left: 12px; border-left: 2px solid #2a2a2a;"><b>Multi-region Spot</b> — at any given moment, Google has thousands of GPU chips across CONUS Spot pools. With <code>--requeue</code>, jobs resume from the last checkpoint after preemption. The disk is not reclaimed, only the host.</li></ul>Google\'s <a href="https://cloud.google.com/blog/products/containers-kubernetes/whats-new-in-gke-at-next26" target="_blank">GKE hypercluster</a>, in private GA from Cloud Next \'26, <b>manages 1 million chips across 256,000 nodes spanning multiple regions under a single control plane</b>. AWS announced EKS at 100,000 nodes in July 2025.\n\n<a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-compute-classes" target="_blank">Custom Compute Classes</a> act as the routing policy engine across all five workload categories — Cryo-EM heads to GPU, MD to H4D, Protein Design fans across TPU+GPU, Image Analysis to G4 fractional, Genomics to Cloud Batch — without the researcher choosing the backend.' },
           ] :
           phase === 'img' ? [
-            { body: 'Apps in scope: nnU-Net, DeepLabCut, DeepMedic, DeepCell-tf. GPU-hungry training and inference. Training datasets follow the same staging pattern as Cryo-EM — multi-region GCS, FUSE mount, same <code>/data/</code> paths across regions.\n\nNot every model needs a full H100. <a href="https://docs.cloud.google.com/compute/docs/accelerator-optimized-machines#g4-series" target="_blank">G4 fractional GPUs</a> carve up an NVIDIA RTX PRO 6000 Blackwell (96 GB total) into <b>1/8 (12 GB), 1/4 (24 GB), or 1/2 (48 GB) slices via vGPU</b>. MIG mode adds up to 7 partitions per GPU on top. Azure NCv supports MIG but does not offer vGPU sub-VM shapes.\n\nFor clinical inference — radiology endpoints, real-time microscopy — <a href="https://cloud.google.com/run/docs/configuring/services/gpu" target="_blank">Cloud Run with GPUs</a> serves the fine-tuned model as a managed endpoint. <b>L4 (24 GB) or RTX PRO 6000 Blackwell (96 GB), 5-second cold start, scale-to-zero, per-second billing</b>. AWS Lambda has no GPU support. AWS App Runner has no GPU support. Azure Container Apps GPU is preview-only.' },
+            { body: 'Apps in scope: nnU-Net, DeepLabCut, DeepMedic, DeepCell-tf. GPU-hungry training and inference. Training datasets follow the same staging pattern as Cryo-EM — multi-region GCS, FUSE mount, same <code>/data/</code> paths across regions.\n\nNot every model needs a full H100. <a href="https://docs.cloud.google.com/compute/docs/accelerator-optimized-machines#g4-series" target="_blank">G4 fractional GPUs</a> carve up an NVIDIA RTX PRO 6000 Blackwell (96 GB total) into <b>1/8 (12 GB), 1/4 (24 GB), or 1/2 (48 GB) slices via vGPU</b>. MIG mode adds up to 7 partitions per GPU on top. AWS G5g ships whole L4 instances only — no native fractional split. Azure NCv supports MIG but does not offer vGPU sub-VM shapes.\n\nFor clinical inference — radiology endpoints, real-time microscopy — <a href="https://cloud.google.com/run/docs/configuring/services/gpu" target="_blank">Cloud Run with GPUs</a> serves the fine-tuned model as a managed endpoint. <b>L4 (24 GB) or RTX PRO 6000 Blackwell (96 GB), 5-second cold start, scale-to-zero, per-second billing</b>. AWS Lambda has no GPU support. AWS App Runner has no GPU support. Azure Container Apps GPU is preview-only.' },
           ] :
           phase === 'gen' ? [
             { body: 'Apps in scope: SpliceAI, DanQ, Saturn, plus the Nextflow / nf-core pipelines. This category is <b>already cloud-native</b> — Nextflow\'s <code>gs://</code> URIs define every datasource directly, with no manual staging or FUSE mounts.\n\n<a href="https://docs.cloud.google.com/batch/docs/nextflow" target="_blank">Nextflow on Cloud Batch</a> runs nf-core workflows on Cloud Batch with <b>DWS Flex guaranteeing GPUs underneath</b> — same DSL, managed infrastructure. AWS Batch also runs Nextflow but lacks the 7-day DWS Flex GPU guarantee.' },
+          ] :
+          phase === 'tpu1' ? [
+            { body: 'Six organizations that evaluated NVIDIA and TPU at scale and chose TPU for their most demanding workloads:\n\n<ul style="margin: 8px 0; padding-left: 18px; list-style-type: none;"><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://www.anthropic.com/news/expanding-our-use-of-google-cloud-tpus-and-services" target="_blank">Anthropic</a> — <b>up to 1 million TPU chips for Claude</b>. The largest AI infrastructure commitment in the industry.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://www.networkworld.com/article/4015386/openai-tests-google-tpus-amid-rising-inference-cost-concerns.html" target="_blank">OpenAI</a> — production ChatGPT inference on TPU. Industry analysts put the savings at <b>20–40% cheaper than equivalent GPU inference</b>. Multi-year commitment, deepened with Ironwood (TPU v7) capacity.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://machinelearning.apple.com/research/introducing-apple-foundation-models" target="_blank">Apple</a> — trained Apple Foundation Models on <b>8,192 TPUv4 chips with 52% sustained MFU</b>.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://siliconangle.com/2026/02/26/google-meta-reportedly-strike-new-multibillion-dollar-ai-chip-deal/" target="_blank">Meta</a> — <b>multi-billion-dollar TPU lease in February 2026</b> for Llama training. Meta operates the largest single NVIDIA cluster in the industry (100,000+ H100s); they are diversifying, not switching, because TPU economics on inference and ranking workloads beat the GPU stack they already operate.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://cloud.google.com/customers/midjourney" target="_blank">Midjourney</a> — <b>monthly compute went from $2 million to $700,000</b> after migrating to TPU.</li><li style="margin-bottom: 0; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://cloud.google.com/customers/recursion" target="_blank">Recursion Pharmaceuticals</a> — drug discovery on TPU at scale.</li></ul>Google reports approximately <a href="https://cloud.google.com/ai-infrastructure" target="_blank">90% of generative AI unicorns</a> run on Google Cloud AI infrastructure.' },
+          ] :
+          phase === 'tpu2' ? [
+            { body: 'TPU TCO per hour is <b>30% lower than NVIDIA GB200 and 41% lower than GB300</b>, per <a href="https://newsletter.semianalysis.com/p/tpuv7-google-takes-a-swing-at-the" target="_blank">SemiAnalysis</a>. Realized model FLOPS utilization is <b>40% on TPU versus 30% on GPU — 52% lower cost per effective petaFLOP</b>. Google controls silicon, packaging, interconnect, and system design end-to-end, which captures margin at every layer.\n\nIn November 2025, Anthropic released <a href="https://www.anthropic.com/news/claude-opus-4-5" target="_blank">Claude Opus 4.5 with a 67% price cut</a> — input tokens from $15/M down to $5/M, output from $75/M to $25/M. The price reduction is a direct consequence of running on TPU.\n\nNVIDIA recently <a href="https://www.cnbc.com/2025/12/24/nvidia-groq-deal.html" target="_blank">paid approximately $20 billion for Groq\'s LPU</a>. Groq uses a systolic array architecture <b>functionally similar to what Google pioneered with TPU in 2015</b>.' },
           ] :
           [
             { body: 'Inference complete — results content TBD.' },
