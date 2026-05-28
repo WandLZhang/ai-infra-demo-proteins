@@ -360,9 +360,6 @@ export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, cen
                 ))}
               </div>
             </div>
-            <div className="slice-viz-footer">
-              vGPU slicing &middot; MIG adds up to 7&times; per slice &middot; AWS G5g: whole L4 only
-            </div>
           </div>
         </OverlayView>
       )}

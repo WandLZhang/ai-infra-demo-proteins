@@ -11,9 +11,6 @@ RUN pip install --no-cache-dir \
     transformers \
     "boltz==2.0.3" \
     pytorch-lightning \
-    trifast \
-    cuequivariance-torch \
-    cuequivariance-ops-torch-cu12 \
     google-cloud-storage
 
 # AlphaFold 2.3.x from GitHub

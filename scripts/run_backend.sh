@@ -180,8 +180,9 @@ RESULT_JSON="{\"output_gcs_path\":\"$GCS_OUTPUT_PATH\",\"output_chars\":$OUTPUT_
 update_state "done" "$RESULT_JSON"
 log_event "done" "done — ${ELAPSED_MS}ms \$$COST" "\"elapsed_ms\":$ELAPSED_MS,\"cost\":$COST"
 
-# Release TPU VFIO handles so the next job can access the device
+# Release TPU VFIO handles and lockfile so the next job can access the device
 if [[ "$SILICON" == "tpu" ]]; then
   pkill -f "python3.*predict.py" 2>/dev/null || true
   pkill -f "libtpu" 2>/dev/null || true
+  rm -f /tmp/libtpu_lockfile 2>/dev/null || true
 fi
