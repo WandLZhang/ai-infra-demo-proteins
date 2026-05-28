@@ -1,0 +1,16 @@
+# Cloud Build upload filter — explicitly INCLUDE dist/ (which is gitignored
+# but needed by the Dockerfile that copies it into the nginx image).
+node_modules
+test-results
+playwright-report
+.git
+.env
+.env.*
+*.log
+src
+public
+tests
+package*.json
+tsconfig.json
+vite.config.ts
+playwright.config.ts

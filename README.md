@@ -2,19 +2,17 @@
 
 Live demo for the NIH Biowulf HPC briefing (June 4, 2026). Pressing Enter dispatches 6 real protein inference jobs (3 models × 2 silicons) via Slurm from an on-prem controller to cloud compute nodes.
 
-## Quick Start (5 commands)
+## Quick Start
+
+**Hosted frontend (no local setup needed):** [protein-demo-frontend-212183265679.us-east5.run.app](https://protein-demo-frontend-212183265679.us-east5.run.app) — open, press Enter.
+
+**Local frontend** (for iterating on the React HUD):
 
 ```bash
-# 1. Start IAP tunnel to the controller
-gcloud compute start-iap-tunnel biowulf-controller 8080 \
-  --local-host-port=localhost:8080 \
-  --zone=us-east5-a --project=wz-nih-demo-controller
-
-# 2. Start frontend
-cd local-controller/frontend && npm run dev
-
-# 3. Open browser, press Enter
+cd local-controller/frontend && npm run dev   # http://localhost:3000
 ```
+
+The frontend talks to the state server at `VITE_STATE_SERVER` (see `local-controller/frontend/.env`). No IAP tunnel needed — the state server is a public Cloud Run service.
 
 ## What Happens When You Press Enter
 
@@ -31,29 +29,27 @@ Total time: ~12 minutes (TPU jobs sequential, GPU jobs sequential, real ML infer
 ## Architecture
 
 ```
-Frontend (React)                         Controller (biowulf-controller)
-  │ POST /api/submit                       │ trigger-watcher → predict.sh
-  ▼                                        │ → sbatch × 6
-GCS trigger blob                           ▼
-  gs://wz-nih-demo-shared/triggers/    Slurm scheduler
-                                           │ weight ladder: Spot (w=1) → Guaranteed (w=10)
-                                           ▼
-                                    ┌──────────────────────────────────────────┐
-                                    │  Compute Nodes (wz-nih-demo-burst)       │
-                                    │                                          │
-                                    │  us-east5-a:  TPU v6e (slurm-tpu image) │
-                                    │  us-central1: A100 GPU (slurm-gpu image)│
-                                    │  us-west1:    A100 GPU (slurm-gpu image)│
-                                    │                                          │
-                                    │  Each runs predict.py inside fat Docker  │
-                                    │  container with all ML deps baked in     │
-                                    └──────────────────┬───────────────────────┘
-                                                       │ writes to
-                                                       ▼
-                                    GCS: gs://wz-nih-demo-shared/job/
-                                      {backend}.json     (state blob)
-                                      {backend}.pdb/cif  (structure output)
-                                      log/*.json         (structured events)
+Frontend (Cloud Run, nginx)              State server (Cloud Run, Flask)        Controller (biowulf-controller VM)
+  protein-demo-frontend-...run.app         protein-demo-server-...run.app         trigger-watcher.service → predict.sh
+  │ POST /api/submit ──────────────────▶ │ writes trigger blob to GCS ─────────▶ │ → sbatch × 6 to spot-tpu/spot-gpu
+  │ GET  /api/status (polled)            │ GET reads {backend}.json from GCS     │ Phase 1 (65s) → Phase 2 retries on tpu/gpu
+  ▼                                      ▼                                       ▼
+project: wz-nih-demo-burst             project: wz-nih-demo-burst             Slurm scheduler
+region:  us-east5                      region:  us-east5                        │ weight ladder: Spot (w=1) → Guaranteed (w=10)
+                                                                                ▼
+                                                                         ┌──────────────────────────────────────────┐
+                                                                         │  Compute Nodes (wz-nih-demo-burst)       │
+                                                                         │  us-east5-a:  TPU v6e (slurm-tpu image)  │
+                                                                         │  us-central1: A100 GPU (slurm-gpu image) │
+                                                                         │  us-west1:    A100 GPU (slurm-gpu image) │
+                                                                         │  Each runs predict.py in fat container.  │
+                                                                         └──────────────────┬───────────────────────┘
+                                                                                            │ writes to
+                                                                                            ▼
+                                                                         GCS: gs://wz-nih-demo-shared/job/
+                                                                           {backend}.json     (state blob)
+                                                                           {backend}.pdb/cif  (structure output)
+                                                                           log/*.json         (structured events)
 ```
 
 ## Models & Silicon
@@ -76,21 +72,8 @@ Two fat Docker images with all ML deps, built on top of `slurm-compute:latest`:
 - Needs: `--privileged --ulimit memlock=-1:-1`, tpu-runtime stopped
 
 **slurm-gpu** (`us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-gpu:latest`)
-- torch cu124, JAX cuda12 0.4.38, AlphaFold 2.3, boltz, transformers, trifast, cuequivariance-torch
+- torch 2.6.0 cu124, JAX cuda12 0.4.38, AlphaFold 2.3, boltz 2.0.3, transformers
 - Needs: `--privileged`, NVIDIA libs mounted from host, `ldconfig` after start
-
-### Rebuild containers
-
-```bash
-cp containers/tpu/Dockerfile Dockerfile
-gcloud builds submit --tag=us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-tpu:latest \
-  --project=wz-nih-demo-burst --region=us-east5 --timeout=3600 .
-
-cp containers/gpu/Dockerfile Dockerfile
-gcloud builds submit --tag=us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-gpu:latest \
-  --project=wz-nih-demo-burst --region=us-east5 --timeout=3600 .
-rm Dockerfile
-```
 
 ## Deploy Containers to VMs
 
@@ -125,24 +108,61 @@ sudo docker exec slurmd bash -c "slurmd --conf-server=172.16.0.2:6820 -N nihprot
 '
 ```
 
-## Deploy Scripts
+## Deploy
+
+Three deploy targets, each with its own script. All idempotent — re-run after any code change.
+
+### Frontend → Cloud Run
 
 ```bash
-# Upload to GCS (compute nodes download at job start)
+bash scripts/deploy_frontend.sh
+```
+
+Builds the Vite bundle locally (so `local-controller/frontend/.env` values are baked into the bundle and not uploaded to Cloud Build), then containerizes `dist/` with nginx and deploys to Cloud Run in `wz-nih-demo-burst` / `us-east5`. Returns the service URL. Source files: `local-controller/frontend/{Dockerfile,nginx.conf,.dockerignore,.gcloudignore}`.
+
+> The `.gcloudignore` is critical — `dist/` is in `.gitignore`, which gcloud honors by default for source upload, so without it the Cloud Build context arrives without `dist/` and the build fails at `COPY dist`.
+
+### Controller VM → scripts + systemd
+
+```bash
+bash scripts/deploy_controller.sh
+```
+
+Uploads `predict.sh`, `run_backend.sh`, `watch_triggers.sh`, `poll_squeue.sh`, `env.sh` to `/opt/protein-demo/` on the `biowulf-controller` VM in `wz-nih-demo-controller`, installs Python deps in a venv, fixes the Slurm `resume.py` shebang, tunes Slurm timeouts for demo pacing, grants cross-project IAM (controller SA → burst project for TPU/GPU/storage), and (re)installs `trigger-watcher.service` as a systemd unit.
+
+### State server (Flask) → Cloud Run
+
+`local-controller/server.py` is deployed manually with the Dockerfile in `local-controller/Dockerfile`:
+
+```bash
+cd local-controller
+gcloud run deploy protein-demo-server --source . \
+  --project=wz-nih-demo-burst --region=us-east5 \
+  --allow-unauthenticated
+```
+
+### Containers → Artifact Registry
+
+Two fat ML images (TPU + GPU). Rebuild only when ML dep versions change in `containers/{tpu,gpu}/Dockerfile`.
+
+```bash
+cp containers/tpu/Dockerfile Dockerfile
+gcloud builds submit --tag=us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-tpu:latest \
+  --project=wz-nih-demo-burst --region=us-east5 --timeout=3600 .
+
+cp containers/gpu/Dockerfile Dockerfile
+gcloud builds submit --tag=us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-gpu:latest \
+  --project=wz-nih-demo-burst --region=us-east5 --timeout=3600 .
+rm Dockerfile
+```
+
+After rebuilding, pull the new image on each compute VM and restart `slurmd` (see "Deploy Containers to VMs" below).
+
+### Scripts to GCS (read by sbatch jobs at start)
+
+```bash
 gsutil cp scripts/run_backend.sh scripts/predict.sh scripts/env.sh \
   scripts/poll_squeue.sh scripts/watch_triggers.sh gs://wz-nih-demo-shared/scripts/
-
-# Deploy to controller
-gcloud compute scp scripts/*.sh local-controller/server.py \
-  biowulf-controller:/opt/protein-demo/ \
-  --zone=us-east5-a --project=wz-nih-demo-controller
-
-# Restart services
-gcloud compute ssh biowulf-controller --zone=us-east5-a --project=wz-nih-demo-controller --command="
-  sudo systemctl restart trigger-watcher poll-squeue
-  pkill -f 'python server.py' || true; sleep 2
-  cd /opt/protein-demo && nohup /opt/protein-demo/venv/bin/python server.py > /tmp/server.log 2>&1 &
-"
 ```
 
 ## GCS Layout
@@ -213,19 +233,30 @@ backends/
   esmfold-gpu/predict.py      # ESMFold on CUDA
   boltz2-tpu/predict.py       # Boltz-2 with 10 monkey-patches for XLA
   boltz2-gpu/predict.py       # Boltz-2 stock with trifast
+  esmfold-tpu/bench_modes.py  # Compare torch_xla execution modes on v6e
 
 containers/
   tpu/Dockerfile              # slurm-compute + torch_xla + jax + AF2 + boltz
-  gpu/Dockerfile              # slurm-compute + torch-cu124 + jax-cuda + AF2 + boltz + trifast
+  gpu/Dockerfile              # slurm-compute + torch-cu124 + jax-cuda + AF2 + boltz
 
 scripts/
+  deploy_frontend.sh          # Build Vite + push to Cloud Run (frontend)
+  deploy_controller.sh        # Upload scripts + (re)install systemd on controller VM
   predict.sh                  # 2-phase Spot→guaranteed sbatch dispatcher
   run_backend.sh              # Per-backend job: events + state + inference
   poll_squeue.sh              # slurmctld event scraper
   watch_triggers.sh           # GCS trigger → predict.sh
-  env.sh                      # Project IDs, pricing
+  env.sh                      # Project IDs, region, pricing (sourced by scripts)
+  generate_af2_features.py    # ColabFold MMseqs2 helper for AF2 features.pkl
 
 local-controller/
-  server.py                   # Flask: POST /api/submit
-  frontend/                   # React HUD (Vite)
+  Dockerfile                  # State server (Flask) container for Cloud Run
+  server.py                   # Flask: POST /api/submit, GET /api/status
+  frontend/
+    Dockerfile                # nginx:alpine serving dist/ on port 8080
+    nginx.conf                # SPA fallback + cache headers
+    .dockerignore             # docker build excludes
+    .gcloudignore             # Cloud Build source upload — DOES include dist/
+    src/                      # React HUD source (Vite)
+    .env                      # VITE_GOOGLE_MAPS_API_KEY, VITE_STATE_SERVER (gitignored)
 ```
