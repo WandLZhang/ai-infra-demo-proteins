@@ -5,11 +5,11 @@ RUN apt-get update -qq && apt-get install -y -qq git gcc python3-dev && rm -rf /
 
 # ML deps for all GPU backends
 RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cu124
+    "torch==2.6.0" --index-url https://download.pytorch.org/whl/cu124
 RUN pip install --no-cache-dir \
     "jax[cuda12]==0.4.38" \
     transformers \
-    boltz \
+    "boltz==2.0.3" \
     pytorch-lightning \
     trifast \
     cuequivariance-torch \

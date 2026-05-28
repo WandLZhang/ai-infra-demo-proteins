@@ -1,12 +1,7 @@
 """ESMFold on TPU via TorchTPU (torch_xla).
 
-This is the TorchTPU validation gate: proves that existing PyTorch
-protein-folding code runs on TPU with minimal changes. Validates
-Slide 12 of the NIH talk track.
-
-The ONLY difference from esmfold-gpu/predict.py:
-  - model.to(xla_device) instead of model.cuda()
-  - inputs moved to xla_device instead of cuda
+Eager mode — XLA compiles ops on first encounter per tensor shape.
+Benchmarked on v6e Trillium (hemoglobin 142aa): ~69s cold, ~9s warm.
 """
 
 from __future__ import annotations
@@ -47,14 +42,6 @@ def load_model() -> ModelState:
     model = EsmForProteinFolding.from_pretrained(_MODEL_ID)
     model = model.to(device)
     model.eval()
-
-    # Warm up with a short sequence to trigger XLA compilation
-    dummy = tokenizer("MGSSHHHHH", return_tensors="pt", add_special_tokens=False)
-    dummy = {k: v.to(device) for k, v in dummy.items()}
-    with torch.no_grad():
-        model(**dummy)
-    xm.mark_step()
-    print(f"[esmfold-tpu] warm-up complete on {device}")
 
     _state = ModelState(model=model, tokenizer=tokenizer, device=device)
     return _state
