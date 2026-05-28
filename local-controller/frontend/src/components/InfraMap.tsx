@@ -104,7 +104,14 @@ interface InfraMapProps {
   highlightUS?: boolean
   showSpokes?: boolean
   showHalos?: boolean
+  mdLayer?: 'storage' | 'compute' | 'topology' | null
+  showHyperdiskHub?: boolean
+  showPartitionChips?: boolean
+  showSliceViz?: boolean
 }
+
+// us-central1 (Council Bluffs, IA) — anchor for the MD russian-doll overlay.
+const US_CENTRAL1_POSITION: google.maps.LatLngLiteral = { lat: 41.2588, lng: -95.8519 }
 
 // When MAP_ID is set, all styling lives in Cloud Maps Studio (linked to the Map ID's Dark mode slot)
 // and `styles` is ignored. `colorScheme: 'DARK'` forces dark rendering regardless of system preference.
@@ -130,7 +137,7 @@ const US_FEATURE_STYLE: google.maps.FeatureStyleOptions = {
   strokeWeight: 1.2,
 }
 
-export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, center, zoom, highlightUS, showSpokes, showHalos }: InfraMapProps) {
+export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, center, zoom, highlightUS, showSpokes, showHalos, mdLayer, showHyperdiskHub, showPartitionChips, showSliceViz }: InfraMapProps) {
   const { isLoaded } = useJsApiLoader({ googleMapsApiKey: MAPS_API_KEY })
 
   // Two map instances stacked, cross-fade between them.
@@ -141,6 +148,30 @@ export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, cen
 
   const [activeMap, setActiveMap] = React.useState<'A' | 'B'>('A')
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  // Delay rendering the MD russian-doll overlay until after the zoom/pan
+  // transition completes (~1s total: 500ms tile preload + 500ms zoom steps).
+  // Storage boxes appearing mid-zoom otherwise look glitchy.
+  const [mdLayerReady, setMdLayerReady] = React.useState<typeof mdLayer>(null)
+  React.useEffect(() => {
+    if (mdLayer) {
+      const t = setTimeout(() => setMdLayerReady(mdLayer), 1100)
+      return () => clearTimeout(t)
+    } else {
+      setMdLayerReady(null)
+    }
+  }, [mdLayer])
+
+  // Same delay pattern for the PD Hyperdisk ML hub overlay.
+  const [hyperdiskReady, setHyperdiskReady] = React.useState(false)
+  React.useEffect(() => {
+    if (showHyperdiskHub) {
+      const t = setTimeout(() => setHyperdiskReady(true), 1100)
+      return () => clearTimeout(t)
+    } else {
+      setHyperdiskReady(false)
+    }
+  }, [showHyperdiskHub])
 
   const onLoadA = useCallback((m: google.maps.Map) => {
     mapARef.current = m
@@ -299,6 +330,42 @@ export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, cen
           </div>
         </OverlayView>
       )}
+      {showSliceViz && (
+        <OverlayView position={US_BUCKET_LABEL_POSITION} mapPaneName={OverlayView.FLOAT_PANE}>
+          {/* Fractional GPU viz — one RTX PRO 6000 Blackwell carved three ways.
+              All rows the same total width = the whole GPU; just sliced differently. */}
+          <div className="slice-viz">
+            <div className="slice-viz-label">RTX PRO 6000 BLACKWELL &middot; 96 GB</div>
+            <div className="slice-row-group">
+              <div className="slice-row-name">1/8</div>
+              <div className="slice-row">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="slice-cell">12</div>
+                ))}
+              </div>
+            </div>
+            <div className="slice-row-group">
+              <div className="slice-row-name">1/4</div>
+              <div className="slice-row">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="slice-cell">24</div>
+                ))}
+              </div>
+            </div>
+            <div className="slice-row-group">
+              <div className="slice-row-name">1/2</div>
+              <div className="slice-row">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="slice-cell">48</div>
+                ))}
+              </div>
+            </div>
+            <div className="slice-viz-footer">
+              vGPU slicing &middot; MIG adds up to 7&times; per slice &middot; AWS G5g: whole L4 only
+            </div>
+          </div>
+        </OverlayView>
+      )}
       <ZoneMarker
         key="biowulf-home"
         position={BIOWULF_HOME}
@@ -308,6 +375,52 @@ export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, cen
         state="done"
         onClick={() => {}}
       />
+      {hyperdiskReady && (
+        <OverlayView position={US_CENTRAL1_POSITION} mapPaneName={OverlayView.FLOAT_PANE}>
+          {/* 3-stack sandwich: each layer = one mechanism for fast workload startup.
+              Top = pod state (Pod Snapshots), middle = host (BoltVMs), bottom = data
+              (Hyperdisk ML). Anchored at us-central1 since Hyperdisk ML is zonal. */}
+          <div className="pd-stack-wrap">
+            <div className="pd-stack-row">
+              <div className="pd-stack-name">Pod Snapshots</div>
+              <div className="pd-stack-hero">seconds</div>
+              <div className="pd-stack-meta">80% faster warm restart</div>
+            </div>
+            <div className="pd-stack-row">
+              <div className="pd-stack-name">BoltVMs</div>
+              <div className="pd-stack-hero">2 min</div>
+              <div className="pd-stack-meta">H100 vs 15 min cold start</div>
+            </div>
+            <div className="pd-stack-row">
+              <div className="pd-stack-name">Hyperdisk ML</div>
+              <div className="pd-stack-hero">1.2 TiB/s</div>
+              <div className="pd-stack-meta">2,500 readers &middot; 11.9&times; vs GCS</div>
+            </div>
+          </div>
+        </OverlayView>
+      )}
+      {mdLayerReady && (
+        <OverlayView position={US_CENTRAL1_POSITION} mapPaneName={OverlayView.FLOAT_PANE}>
+          <div className="md-doll-outer" data-visible={mdLayerReady === 'topology'}>
+            <div className="md-doll-label">CLUSTER &middot; BLOCK &middot; RACK</div>
+            <div className="md-doll-middle" data-visible={mdLayerReady === 'compute' || mdLayerReady === 'topology'}>
+              <div className="md-doll-label">H4D &middot; 192 vCPU &middot; 200 GBPS FALCON</div>
+              <div className="md-doll-inner">
+                <div className="md-doll-storage">
+                  <div className="md-doll-storage-hero">10 TB/s</div>
+                  <div className="md-doll-storage-name">Managed Lustre</div>
+                  <div className="md-doll-storage-meta">POSIX &middot; DDN</div>
+                </div>
+                <div className="md-doll-storage">
+                  <div className="md-doll-storage-hero">15 TB/s</div>
+                  <div className="md-doll-storage-name">Rapid Bucket</div>
+                  <div className="md-doll-storage-meta">20M QPS &middot; Appendable</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </OverlayView>
+      )}
       {ZONE_LOCATIONS.map(zone => {
         const zoneVms: VMInfo[] = Object.values(vmStates)
           .filter(vm => vm.zone === zone.id)
@@ -325,6 +438,7 @@ export default function InfraMap({ lanes, zoneStates, vmStates, onZoneClick, cen
             vms={zoneVms}
             onClick={() => onZoneClick(zone)}
             showHalo={showHalos}
+            showPartitionChips={showPartitionChips}
           />
         )
       })}

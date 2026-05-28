@@ -18,6 +18,13 @@ interface ZoneMarkerProps {
   vms?: VMInfo[]
   onClick?: () => void
   showHalo?: boolean
+  showPartitionChips?: boolean
+}
+
+// VM names contain "spot" for Spot-partition nodes; otherwise they ran on
+// the guaranteed (DWS Flex) partition. This derives the chip label.
+function partitionOf(vmName: string): 'SPOT' | 'FLEX' {
+  return vmName.toLowerCase().includes('spot') ? 'SPOT' : 'FLEX'
 }
 
 const VM_STATE_COLORS: Record<MarkerState, string> = {
@@ -28,7 +35,7 @@ const VM_STATE_COLORS: Record<MarkerState, string> = {
   done: '#09d3ac',
 }
 
-export default function ZoneMarker({ position, label, subtitle, subtitleHref, state, vms, onClick, showHalo }: ZoneMarkerProps) {
+export default function ZoneMarker({ position, label, subtitle, subtitleHref, state, vms, onClick, showHalo, showPartitionChips }: ZoneMarkerProps) {
   const stateClass = state === 'done' ? 'marker-done' : state === 'active' ? 'marker-active' : state === 'provisioning' ? 'marker-provisioning' : state === 'failed' ? 'marker-failed' : ''
 
   return (
@@ -47,8 +54,12 @@ export default function ZoneMarker({ position, label, subtitle, subtitleHref, st
               ? <a href={subtitleHref} target="_blank" rel="noopener" style={{ display: 'block', fontSize: '0.75em', color: '#708090', textDecoration: 'none', marginTop: 1 }}>{subtitle}</a>
               : <span style={{ display: 'block', fontSize: '0.75em', color: '#708090', marginTop: 1 }}>{subtitle}</span>
           )}
-          {vms && vms.length > 0 && vms.map(vm => (
-            vm.href ? (
+          {vms && vms.length > 0 && vms.map(vm => {
+            const part = partitionOf(vm.name)
+            const chip = showPartitionChips ? (
+              <span className={`partition-chip partition-chip-${part.toLowerCase()}`}>{part}</span>
+            ) : null
+            return vm.href ? (
               <a
                 key={vm.name}
                 href={vm.href}
@@ -62,7 +73,7 @@ export default function ZoneMarker({ position, label, subtitle, subtitleHref, st
                   marginTop: 1,
                 }}
               >
-                {vm.name}
+                {chip}{vm.name}
               </a>
             ) : (
               <span
@@ -74,10 +85,10 @@ export default function ZoneMarker({ position, label, subtitle, subtitleHref, st
                   marginTop: 1,
                 }}
               >
-                {vm.name}
+                {chip}{vm.name}
               </span>
             )
-          ))}
+          })}
         </div>
       </div>
     </OverlayView>

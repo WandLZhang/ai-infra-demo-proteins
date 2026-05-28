@@ -63,6 +63,15 @@
   from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); filter: blur(8px); }
   to   { opacity: 1; transform: translate(-50%, -50%) scale(1);    filter: blur(0); }
 }
+
+/* Transform-free fade-in. Use this for elements whose natural CSS transform
+   differs from translate(-50%, -50%) — animating opacity/filter only avoids
+   the "hop" you get when the keyframe's to-state overrides the real transform
+   for 0.5s and then snaps back when the animation ends. */
+@keyframes softFadeIn {
+  from { opacity: 0; filter: blur(6px); }
+  to   { opacity: 1; filter: blur(0); }
+}
 .bucket-label {
   display: inline-block;          /* size tightly to text */
   transform: translate(-50%, -50%);
@@ -116,6 +125,277 @@
   margin-left: 4px;
 }
 .marker-text-box b { font-weight: 700; }
+
+/* MD russian-doll overlay — nested layers (storage → H4D → topology) reveal
+   as md1 → md2 → md3 advances. Outer wrappers always reserve padding so the
+   inner storage row stays anchored at us-central1; their border + label fade
+   in via data-visible="true". */
+.md-doll-outer {
+  display: inline-block;             /* size tightly to nested content, not parent width */
+  /* Sit BELOW the us-central1 marker: doll's top edge sits 40px below the anchor
+     lat/lng, so the spinner stays visible above. */
+  transform: translate(-50%, 40px);
+  padding: 36px 40px 32px;
+  border: 1.5px solid transparent;
+  position: relative;
+  transition: border-color 0.5s ease, box-shadow 0.5s ease;
+  animation: dollIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.md-doll-middle {
+  display: block;                    /* fills inline-block parent's content box */
+  padding: 30px 34px 26px;
+  border: 1.5px solid transparent;
+  position: relative;
+  transition: border-color 0.5s ease, box-shadow 0.5s ease;
+}
+.md-doll-outer[data-visible="true"],
+.md-doll-middle[data-visible="true"] {
+  border-color: #09d3ac;
+  box-shadow: 0 0 24px rgba(9, 211, 172, 0.25), inset 0 0 28px rgba(9, 211, 172, 0.04);
+}
+@keyframes dollIn {
+  from { opacity: 0; transform: translate(-50%, 40px) scale(0.96); filter: blur(6px); }
+  to   { opacity: 1; transform: translate(-50%, 40px) scale(1);    filter: blur(0); }
+}
+
+/* Top-center "tab" labels that sit on the border, breaking it cleanly. */
+.md-doll-label {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0a0a0a;
+  padding: 0 14px;
+  color: #09d3ac;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  white-space: nowrap;
+  pointer-events: none;
+  line-height: 18px;
+}
+.md-doll-outer[data-visible="true"] > .md-doll-label,
+.md-doll-middle[data-visible="true"] > .md-doll-label {
+  opacity: 1;
+}
+
+/* HUD-style corner brackets on the outermost ring — adds the sci-fi feel. */
+.md-doll-outer[data-visible="true"]::before,
+.md-doll-outer[data-visible="true"]::after,
+.md-doll-middle[data-visible="true"]::before,
+.md-doll-middle[data-visible="true"]::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: #09d3ac;
+  border-style: solid;
+}
+.md-doll-outer[data-visible="true"]::before {
+  top: -3px; left: -3px; border-width: 2px 0 0 2px;
+}
+.md-doll-outer[data-visible="true"]::after {
+  bottom: -3px; right: -3px; border-width: 0 2px 2px 0;
+}
+.md-doll-middle[data-visible="true"]::before {
+  top: -3px; right: -3px; border-width: 2px 2px 0 0;
+}
+.md-doll-middle[data-visible="true"]::after {
+  bottom: -3px; left: -3px; border-width: 0 0 2px 2px;
+}
+
+.md-doll-inner {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  align-items: stretch;
+}
+
+/* Storage box — the "juice." Hero number on top, product name in cyan,
+   subtle meta line below. Fixed min-width so the box doesn't squish. */
+.md-doll-storage {
+  background: linear-gradient(180deg, rgba(9, 211, 172, 0.06) 0%, #000 60%);
+  border: 1px solid #09d3ac;
+  padding: 14px 22px 12px;
+  font-family: 'Courier New', Courier, monospace;
+  color: #09d3ac;
+  text-align: center;
+  box-shadow: 0 0 18px rgba(9, 211, 172, 0.35), inset 0 0 14px rgba(9, 211, 172, 0.05);
+  animation: softFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.md-doll-storage-hero {
+  font-family: 'BaronNeue-Regular', sans-serif;
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: #fff;
+  line-height: 1;
+}
+.md-doll-storage-name {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #09d3ac;
+  margin-top: 6px;
+}
+.md-doll-storage-meta {
+  font-size: 10px;
+  color: #708090;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* Fractional GPU slice viz — img slide only. One RTX PRO 6000 Blackwell
+   visualized three ways (1/8, 1/4, 1/2). All rows same total width = the
+   whole GPU; slicing pattern reads visually. Anchored below the multi-region
+   bucket label at US_BUCKET_LABEL_POSITION. */
+.slice-viz {
+  width: 460px;
+  box-sizing: border-box;
+  /* Center horizontally on lat/lng; offset down so the multi-region bucket
+     label above stays readable. */
+  transform: translate(-50%, 60px);
+  background: #000;
+  border: 1px solid #09d3ac;
+  padding: 14px 18px 12px;
+  font-family: 'Courier New', Courier, monospace;
+  color: #09d3ac;
+  box-shadow: 0 0 22px rgba(9, 211, 172, 0.35), inset 0 0 16px rgba(9, 211, 172, 0.04);
+  animation: softFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+.slice-viz-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #09d3ac;
+  text-align: center;
+  margin-bottom: 12px;
+}
+.slice-row-group {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.slice-row-group:last-of-type { margin-bottom: 0; }
+.slice-row-name {
+  width: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 10px;
+  color: #708090;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.slice-row {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+.slice-cell {
+  flex: 1;
+  background: linear-gradient(180deg, rgba(9, 211, 172, 0.18) 0%, rgba(9, 211, 172, 0.04) 100%);
+  border: 1px solid rgba(9, 211, 172, 0.7);
+  padding: 7px 0;
+  text-align: center;
+  font-size: 10px;
+  color: #d3d3d3;
+  letter-spacing: 0.05em;
+}
+.slice-viz-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(9, 211, 172, 0.3);
+  font-size: 9.5px;
+  color: #708090;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+/* PD 3-stack sandwich — pd1 only. Three boxes stacked vertically below the
+   us-central1 spinner, reading bottom-to-top as the workload startup flow:
+   Hyperdisk ML loads model weights → BoltVMs serve a warm host → Pod Snapshots
+   restore pod state. Each box reuses the .md-doll-storage styling for visual
+   consistency with the MD doll's storage row. */
+.pd-stack-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  /* Anchor stack so its top edge sits 40px below the us-central1 spinner,
+     mirroring the MD doll's translate(-50%, 40px) positioning. */
+  transform: translate(-50%, 40px);
+  animation: softFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pd-stack-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  width: 440px;          /* fixed so all three rows are exactly the same length */
+  box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(9, 211, 172, 0.06) 0%, #000 60%);
+  border: 1px solid #09d3ac;
+  padding: 7px 18px;
+  font-family: 'Courier New', Courier, monospace;
+  box-shadow: 0 0 14px rgba(9, 211, 172, 0.3), inset 0 0 10px rgba(9, 211, 172, 0.04);
+  white-space: nowrap;
+}
+.pd-stack-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #09d3ac;
+  flex-shrink: 0;
+}
+.pd-stack-hero {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  color: #708090;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.pd-stack-meta {
+  font-size: 10px;
+  color: #708090;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: right;
+}
+
+/* SPOT / FLEX chips next to each VM line on pd2/pd3 — visualizes the
+   Spot→Flex failover pattern. Yellow = SPOT (same hue as provisioning,
+   "scarce/risky"), cyan = FLEX (same hue as done, "guaranteed"). */
+.partition-chip {
+  display: inline-block;
+  font-size: 0.65em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 0 4px;
+  margin-right: 5px;
+  border: 1px solid currentColor;
+  vertical-align: middle;
+  line-height: 1.25;
+}
+.partition-chip-spot { color: #eab308; }
+.partition-chip-flex { color: #09d3ac; }
 
 /* Zone cache halo — cyan ring around each marker on the catalog3 slide.
    Visualizes Rapid Cache (SSD data) + Image Streaming (container files) landing zone-local. */
