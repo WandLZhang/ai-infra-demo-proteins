@@ -128,3 +128,6 @@ tmp/
 temp/
 *.tar.gz
 .env*
+
+# Playwright test output
+test-results/

@@ -18,8 +18,8 @@ const PROTEINS: Protein[] = [
   { id: 'cftr', name: 'CFTR NBD1', sequence: 'NLTTTEVVMENVTAFWEEGFGEL...', uniprotId: 'P13569', description: 'Cystic fibrosis transmembrane regulator', residueCount: 251 },
 ]
 
-// UX phases: zoomed on Building 12 → terminal → submit → zoom out → results
-type Phase = 'home' | 'dispatching' | 'running' | 'done'
+// UX phases: zoomed on Building 12 → terminal → submit → zoom out → catalog → catalog2 → results
+type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'done'
 
 function initLaneStatus(backendId: BackendId): LaneStatus {
   const b = BACKENDS.find(b => b.id === backendId)!
@@ -201,8 +201,9 @@ export default function App() {
         if (status.all_complete && lineQueue.current.length === 0) {
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = null
-          setPhase('done')
-                  }
+          // Only auto-advance to 'done' if user hasn't manually advanced to 'catalog'
+          setPhase(p => p === 'running' || p === 'dispatching' ? 'done' : p)
+        }
       } catch (err) {
         console.error('Poll error:', err)
       }
@@ -244,24 +245,51 @@ export default function App() {
     }
   }, [currentProtein, startPolling])
 
-  // Enter key triggers submit (terminal UX)
+  // Enter + Arrow keys advance the narrative: home → run → catalog → done
+  // ArrowLeft navigates back through the same sequence
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === 'ArrowRight') {
         e.preventDefault()
-        if (phase === 'home') handleSubmit()
+        if (phase === 'home') {
+          // If a run is already in flight (user navigated back here), just go forward without re-submitting
+          const hasActiveRun = Object.values(lanes).some(l => l.state !== 'idle')
+          if (hasActiveRun) setPhase('running')
+          else handleSubmit()
+        }
+        else if (phase === 'dispatching' || phase === 'running') setPhase('catalog')
+        else if (phase === 'catalog') setPhase('catalog2')
+        else if (phase === 'catalog2') setPhase('catalog3')
+        else if (phase === 'catalog3') setPhase('catalog4')
+        else if (phase === 'catalog4') setPhase('md1')
+        else if (phase === 'md1') setPhase('md2')
+        else if (phase === 'md2') setPhase('md3')
+        // 'md3' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
+        // 'done' stays
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        if (phase === 'done') setPhase('md3')
+        else if (phase === 'md3') setPhase('md2')
+        else if (phase === 'md2') setPhase('md1')
+        else if (phase === 'md1') setPhase('catalog4')
+        else if (phase === 'catalog4') setPhase('catalog3')
+        else if (phase === 'catalog3') setPhase('catalog2')
+        else if (phase === 'catalog2') setPhase('catalog')
+        else if (phase === 'catalog') setPhase('running')
+        else if (phase === 'running' || phase === 'dispatching') setPhase('home')
+        // 'home' stays
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [phase, handleSubmit])
+  }, [phase, handleSubmit, lanes])
 
   const isRunning = phase === 'dispatching' || phase === 'running'
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#171717', overflow: 'hidden', position: 'relative' }}>
       {/* Fullscreen map — zoom driven by phase */}
-      <InfraMap lanes={lanes} zoneStates={zoneStates} vmStates={vmStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} />
+      <InfraMap lanes={lanes} zoneStates={zoneStates} vmStates={vmStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} highlightUS={phase === 'catalog' || phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4'} showSpokes={phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4'} showHalos={phase === 'catalog3' || phase === 'catalog4'} />
 
       {/* Top-left: Hamburger menu */}
       <div style={{ position: 'fixed', top: 15, left: 15, zIndex: 25 }}>
@@ -316,25 +344,34 @@ export default function App() {
       </div>
 
       {/* Terminal — top edge anchored, auto-scrolls to bottom as new lines append */}
-      <div ref={terminalRef} style={{
+      <div ref={terminalRef} className="terminal-box" style={{
         position: 'fixed',
-        top: '42%',
-        left: '50%',
-        transform: 'translateX(-50%)',
+        // Home: original small centered box (42vh top + 25vh tall → 33vh bottom).
+        // Non-home: spans from below hamburger to just above location-paper (~12vw + buffer).
+        top:    phase === 'home' ? '42vh' : '75px',
+        bottom: phase === 'home' ? '33vh' : 'calc(12vw + 12px)',
+        // Tighter when anchored so more map is visible. Width animates in Phase 2.
+        width:  phase === 'home' ? '30vw' : '22vw',
+        // Always anchored at left: 1vw. Centered on home via transform alone (no jiggle).
+        // translateX(34vw) puts left edge at 35vw = (100-30)/2, centering the 30vw home box.
+        left: '1vw',
+        transform: phase === 'home' ? 'translateX(34vw)' : 'translateX(0)',
+        // Two-phase: slide horizontally first (0-0.35s), THEN resize (0.35-0.70s) vertically + horizontally.
+        transition:
+          'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),' +
+          ' top 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.35s,' +
+          ' bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.35s,' +
+          ' width 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.35s',
         zIndex: 20,
-        background: '#000', border: '1px solid #d3d3d3', padding: 12,
-        fontFamily: "'Courier New', Courier, monospace", fontSize: '1.5vmin',
-        color: '#d3d3d3', width: '30vw', height: '25vh', overflowY: 'auto' as const,
-        whiteSpace: 'pre-wrap' as const, cursor: 'default',
       }}>
-        <div style={{ color: '#708090', fontSize: '1.2vmin' }}>Last login: {new Date().toLocaleString()} on tty1</div>
+        <div style={{ color: '#708090', fontSize: '1vmin' }}>Last login: {new Date().toLocaleString()} on tty1</div>
         <div style={{ color: '#d3d3d3' }}>researcher@biowulf-bld12:~$ <span style={{ color: '#09d3ac' }}>sbatch predict.sh \</span></div>
         <div style={{ color: '#09d3ac' }}>  --model=all --target=both --protein={currentProtein.id} \</div>
         <div style={{ color: '#09d3ac' }}>  --requeue --partition=tpu,gpu</div>
         {phase === 'home' && (
           <div style={{ marginTop: 6, color: '#708090', fontSize: '1.1vmin' }}>Press Enter to submit</div>
         )}
-        {(phase === 'dispatching' || phase === 'running' || phase === 'done') && dispatchLines.length > 0 && (
+        {phase !== 'home' && dispatchLines.length > 0 && (
           <>
             {dispatchLines.map((line, i) => (
               <div key={i} className="terminal-line" style={{ color: '#eab308', marginTop: i === 0 ? 6 : 0 }}>{line}</div>
@@ -347,8 +384,9 @@ export default function App() {
       {/* Side ladder — always visible, fills with values as backends complete */}
       <SideLadder lanes={lanes} onSelect={() => {}} />
 
-      {/* Location paper — key forces remount on phase change, re-triggering locationAnim */}
-      <div className="location-paper" key={`loc-${phase}`}>
+      {/* Location paper — key only changes on home↔cloud transitions, so the protein "comes in"
+          on slide 1 → slide 2 and stays put through subsequent slide navigation */}
+      <div className="location-paper" key={phase === 'home' ? 'loc-home' : 'loc-cloud'}>
         <div className="location-paper-region">
           {phase === 'home' ? 'BUILDING 12' : (selectedZone?.label || 'BIOWULF — MULTI-REGION BURST')}
         </div>
@@ -369,8 +407,15 @@ export default function App() {
         onToggle={() => setInfoOpen(!infoOpen)}
         title={
           phase === 'home' ? 'Biowulf Home' :
-          phase === 'dispatching' ? 'Dispatching' :
+          phase === 'dispatching' ? 'Multi-Region Burst' :
           phase === 'running' ? 'Multi-Region Burst' :
+          phase === 'catalog' ? 'Biowulf Scientific Applications Catalog' :
+          phase === 'catalog2' ? 'Multi-Region Bucket: Hierarchical Namespace' :
+          phase === 'catalog3' ? 'Rapid Cache & Image Streaming' :
+          phase === 'catalog4' ? 'vs AWS & Azure' :
+          phase === 'md1' ? 'Molecular Dynamics' :
+          phase === 'md2' ? 'H4D + Cloud RDMA (Falcon)' :
+          phase === 'md3' ? 'Five MPI-Specific Google Features' :
           'Results'
         }
         sections={
@@ -378,16 +423,31 @@ export default function App() {
             { body: 'The <a href="https://hpc.nih.gov/" target="_blank">Biowulf cluster</a> serves 2,500 researchers across 23 NIH institutes — 105,000 processors, 336 A100 GPUs, and a <a href="https://hpc.nih.gov/apps/" target="_blank">scientific applications catalog</a> that covers everything from GROMACS to AlphaFold. Building 12 is approaching end of life, GPU queue pressure continues to grow, and three new AI staff have joined to keep pace with demand. Today\'s conversation is about how to extend that capacity.\n\nGoogle Cloud was NIH\'s <a href="https://www.hpcwire.com/2018/07/31/google-is-first-partner-in-nihs-strides-effort-to-speed-discovery-in-the-cloud/" target="_blank">first commercial cloud partner</a> under the STRIDES Initiative in 2018. Google designs its own silicon, network transport, and datacenter hardware — attributes that make cloud bursting with Google worth a closer look.\n\nOn screen is a terminal on Building 12 with a real Slurm command: <code>sbatch predict.sh --model=all --target=both --protein=brca1 --requeue --partition=tpu,gpu</code>. This terminal sits inside a controller project simulating Biowulf on-premise, ready to burst compute into a separate cloud project. When we press Enter, six inference jobs will dispatch across both TPU and GPU partitions to whichever CONUS regions have Spot capacity.' },
           ] :
           phase === 'dispatching' || phase === 'running' ? [
-            { body: 'The on-prem Slurm controller submitted six jobs to compute nodes in a separate cloud project. The controller didn\'t move — the compute burst out. Slurm\'s <code>--requeue</code> flag means if any Spot node is preempted, the job automatically retries in the next available zone.\n\nThe architecture is one Slurm cluster. The controller sits on-prem — simulated here by a VM in a controller project connected to the burst project via <a href="https://cloud.google.com/vpc/docs/vpc-peering" target="_blank">VPC peering</a>. In production, NIH would use a <a href="https://cloud.google.com/network-connectivity/docs/interconnect/concepts/overview" target="_blank">400G Dedicated Interconnect</a> from Building 12 to Ashburn. Same private IP connectivity, sub-millisecond latency, MACsec encrypted.\n\nCompute nodesets are defined with weight-based priority. TPU partition tries us-west1 first (largest Spot pool), then us-east5, us-central1. GPU tries us-central1 first. The admin configures this once — researchers never see it.\n\nFor storage, <a href="https://cloud.google.com/storage-transfer/docs/overview" target="_blank">Storage Transfer Service</a> runs an agent on GPFS and does scheduled incremental syncs to GCS — only new and changed files transfer. The Slurm prolog stages data from GCS to <a href="https://docs.cloud.google.com/managed-lustre/docs/overview" target="_blank">Managed Lustre</a> as hot scratch at job start; the epilog syncs results back.' },
-            { body: '<b>Workloads suited for cloud bursting from <a href="https://hpc.nih.gov/apps/" target="_blank">Biowulf\'s catalog</a>:</b>\n\n<b>Cryo-EM</b> — AreTomo, MotionCor2, CryoSPARC, RELION. Multi-GPU, queue-bound. Pre-stage to Managed Lustre, run on cloud GPUs.\n\n<b>Molecular Dynamics</b> — GROMACS, NAMD, AMBER. Tightly-coupled MPI, latency-sensitive. For <a href="https://cloud.google.com/blog/products/compute/new-h4d-vms-optimized-for-hpc" target="_blank">H4D</a> with Cloud RDMA.\n\n<b>Protein Design</b> — RFdiffusion, BindCraft, AlphaFold. Embarrassingly parallel. Small inputs, large compute. Burst immediately, no storage dependency.\n\n<b>Biomedical Imaging</b> — nnU-Net, DeepLabCut. GPU-hungry. Datasets stage once to GCS, mount via <a href="https://cloud.google.com/storage/docs/cloud-storage-fuse/overview" target="_blank">Cloud Storage FUSE</a>.\n\n<b>Genomics</b> — SpliceAI, Nextflow/nf-core. <code>gs://</code> URIs define datasources natively. <a href="https://docs.cloud.google.com/batch/docs/nextflow" target="_blank">Cloud Batch</a> manages infrastructure.' },
-            { body: 'DWS Flex Start: guaranteed 7 days, no reservation contract. Calendar Mode: lock in up to 90 days for grant deadlines.\n\nMulti-region Spot: <code>sbatch --requeue</code> resumes from checkpoint. BoltVMs: H100 cold-start ~2 min.\n\nPSSA: Each IC contributes via TAPs — researchers aren\'t charged per job. PSSA maps to that model: fixed annual line item, no per-researcher metering.' },
-            { body: '6 of 7 top Biowulf GPU apps have pre-built containers:\nGROMACS, NAMD, AMBER, RELION — NGC containers\nRFdiffusion — BioNeMo Blueprints on GKE\nnnU-Net — standard PyTorch container\nCryoSPARC — license-bound manual deploy (vendor constraint, not GCP gap)\n\nCryo-EM (AreTomo, MotionCor2), biomedical imaging (DeepLabCut, nnU-Net), genomics (SpliceAI) — all covered.' },
-            { body: 'Titanium: 100% CPU cores to science. Palomar OCS: reroutes around chip failures, no restart. Node Health Prediction: drains nodes before failure. Multi-tier checkpointing: RAM, peer, GCS. Topology-aware Slurm via Cluster Director.' },
+            { body: 'The on-prem Slurm controller in one project submits jobs to compute nodes in a separate cloud project. The controller does not move — the compute bursts out.\n\nThe architecture is one Slurm cluster. The controller sits on-prem; in this demo it is simulated by a VM in a controller project connected to the burst project over <a href="https://cloud.google.com/vpc/docs/vpc-peering" target="_blank">VPC peering</a>. In production, NIH would use a <a href="https://cloud.google.com/network-connectivity/docs/interconnect/concepts/overview" target="_blank">400 Gbps Dedicated Interconnect</a> from Building 12 to the nearest Google edge in Ashburn — same private IP connectivity, sub-millisecond latency on the Interconnect leg, MACsec encrypted in transit. <a href="https://cloud.google.com/managed-microsoft-ad/docs/overview" target="_blank">Managed Microsoft AD</a> trust bridges Biowulf\'s UID/GID into cloud nodes, so researchers log in with the same identity they use today.\n\nSlurm\'s <code>--requeue</code> flag handles Spot preemption: if a node is reclaimed, the job retries in the next available zone. The compute nodesets are configured once with weight-based priority. For the TPU partition, Slurm tries us-west1 first (the largest Spot pool), then us-east5, then us-central1. For GPU, us-central1 is first. Researchers see none of this — they submit <code>sbatch</code> and Slurm handles the rest.' },
+          ] :
+          phase === 'catalog' ? [
+            { body: 'The workloads in the <a href="https://hpc.nih.gov/apps/" target="_blank">Biowulf scientific applications catalog</a> fall into five categories by data and compute profile. Each maps to a different set of cloud primitives.' },
+            { body: '<b>Cryo-EM &amp; Tomography</b>\n\nApps in scope: AreTomo2/3, MotionCor2/3, Gctf, CryoSPARC, RELION. Multi-GPU accelerated and queue-bound on Biowulf. Input datasets are large — hundreds of GB per session — but static per experiment, making this an ideal burst profile.\n\n<a href="https://cloud.google.com/storage-transfer/docs/overview" target="_blank">Storage Transfer Service</a> runs an agent on the GPFS filesystem and performs scheduled incremental syncs to a <a href="https://docs.cloud.google.com/storage/docs/locations" target="_blank">multi-region Cloud Storage bucket</a> (US). Only changed files transfer, POSIX attributes and symlinks are preserved, and project directories are pre-staged before jobs submit — the hundreds of GB of session data flow into the cloud once, not once per job.' },
+          ] :
+          phase === 'catalog2' ? [
+            { body: 'The bucket has <a href="https://docs.cloud.google.com/storage/docs/hns-overview" target="_blank">Hierarchical Namespace</a> enabled. <b>8× higher initial QPS than flat buckets (40,000 reads/sec versus 5,000)</b> keeps RELION 3D classification and CryoSPARC NU-refine GPU workers saturated when each refinement round re-reads hundreds of thousands of small particle files.\n\n<b>Atomic folder renames</b> commit a RELION refinement job in one metadata-only API call — <code>gcloud storage mv gs://nih-biowulf-cryoem/Refine3D/job001.staging gs://nih-biowulf-cryoem/Refine3D/job001</code> updates the folder\'s path without physically copying or deleting the underlying particle files. On flat buckets, that same commit is a quadratic copy-and-delete loop across the entire particle stack.\n\nThe <b>99.95% SLA</b> matches the durability bar for irreplaceable microscope data, and the bucket is <b>reachable from every burst region</b> so Spot capacity that surfaces in a different zone next session doesn\'t trigger a re-stage.\n\nCompute nodes mount the bucket via <a href="https://cloud.google.com/storage/docs/cloud-storage-fuse/overview" target="_blank">Cloud Storage FUSE</a>, so the same <code>/data/</code> paths appear regardless of which region the Spot allocation surfaces in — RELION, CryoSPARC, AreTomo, and MotionCor all expect POSIX paths, and Slurm\'s <code>--requeue</code> across regions then works without rewriting job scripts.' },
+          ] :
+          phase === 'catalog3' ? [
+            { body: 'In each burst zone, <a href="https://docs.cloud.google.com/storage/docs/rapid/rapid-cache" target="_blank">Rapid Cache</a> sits as a zonal SSD read cache on top of the multi-region bucket. First read warms the cache; subsequent reads in that zone hit <b>2.5 TB/s at sub-millisecond latency</b> with reduced multi-region transfer fees. For a multi-hour CryoSPARC NU-refine job that re-reads the same particle stack dozens of times, the cache turns a recurring multi-region egress bill into a one-time warm-up — bursting across five regions does not pay 5× egress.\n\nContainer distribution follows the same first-read-fast pattern. <a href="https://catalog.ngc.nvidia.com/orgs/hpc/containers/relion" target="_blank">RELION</a> and <a href="https://catalog.ngc.nvidia.com/orgs/hpc/containers/gromacs" target="_blank">GROMACS</a> ship as pre-built NGC containers between 5 and 15 GB, and <a href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/image-streaming" target="_blank">Image Streaming</a> pulls them from a remote filesystem so pods start immediately while the image downloads in the background — important when Spot capacity lands in a zone where the image isn\'t already cached locally.' },
+          ] :
+          phase === 'catalog4' ? [
+            { body: '<b>AWS S3</b> has no true multi-region buckets. <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/MultiRegionAccessPoints.html" target="_blank">Multi-Region Access Points</a> route requests intelligently, but each object still lives in a single region, so replication storage and cross-region egress both accrue on every cache miss. <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/mountpoint.html" target="_blank">Mountpoint for S3</a> reached general availability in 2023, giving it years less production exposure than <a href="https://cloud.google.com/storage/docs/cloud-storage-fuse/overview" target="_blank">Cloud Storage FUSE</a>, and there is no S3 equivalent to <a href="https://docs.cloud.google.com/storage/docs/rapid/rapid-cache" target="_blank">Rapid Cache</a> at any tier.\n\n<b>Azure Blob Storage</b> is region-pinned with no multi-region bucket equivalent in its catalog, and Azure caps useful <a href="https://learn.microsoft.com/en-us/azure/aks/artifact-streaming" target="_blank">image streaming</a> around 30 GB — half the headroom Google ships.' },
+          ] :
+          phase === 'md1' ? [
+            { body: 'Apps in scope: GROMACS, NAMD, AMBER, Acemd. Tightly-coupled MPI, latency-sensitive, anchored in one region — a multi-region MPI job is not a meaningful configuration.\n\nThe hot scratch tier is zonal. Two options serve this profile: <a href="https://docs.cloud.google.com/managed-lustre/docs/overview" target="_blank">Managed Lustre</a>, built <a href="https://docs.cloud.google.com/managed-lustre/docs/overview" target="_blank">with DDN</a> — full POSIX, sub-millisecond latency, <b>10 TB/s</b> (AWS FSx for Lustre caps around 2 TB/s); or <a href="https://docs.cloud.google.com/storage/docs/rapid/rapid-bucket" target="_blank">Rapid Bucket</a>, a zonal Cloud Storage bucket using the Rapid storage class — sub-ms, <b>15 TB/s, 20 million QPS</b>, with appendable objects suited to streaming checkpoints. Both live in one zone, co-located with compute. The access pattern — tightly-coupled MPI with concurrent per-rank writes — is what these tiers were designed for.' },
+          ] :
+          phase === 'md2' ? [
+            { body: '<a href="https://cloud.google.com/blog/products/compute/new-h4d-vms-optimized-for-hpc" target="_blank">H4D</a> is the HPC-optimized VM, purpose-built for tightly-coupled MPI. Hardware: <b>5th-gen AMD EPYC Turin, 192 vCPUs, up to 1.5 TB RAM, 200 Gbps</b> <a href="https://docs.cloud.google.com/compute/docs/instances/create-vm-with-rdma" target="_blank">Cloud RDMA</a> via <a href="https://cloud.google.com/blog/products/networking/understanding-cloud-rdma-scalable-high-performance-networking" target="_blank">Falcon</a> — the first CPU VM family to offer hardware-level RDMA in the cloud. Published benchmarks: <a href="https://cloud.google.com/blog/products/compute/new-h4d-vms-optimized-for-hpc" target="_blank">GROMACS Lignocellulose</a> at <b>2.8× over TCP</b> on 32 VMs with Falcon; Ansys Fluent <b>4.1× vs C2D</b>; OpenFOAM <b>5.2× vs C2D with 122% superlinear efficiency</b>.' },
+          ] :
+          phase === 'md3' ? [
+            { body: 'MD is the canonical case for five MPI-specific Google features. Each is unique to Google Cloud:\n\n<ul style="margin: 8px 0; padding-left: 18px; list-style-type: none;"><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/cluster-director/docs/orchestration" target="_blank">Topology-aware Slurm via Cluster Director</a> — the physical network has rack/block/cluster tiers. Cluster Director exposes the hierarchy to Slurm so MPI ranks co-locate on the same rack. <a href="https://docs.cloud.google.com/ai-hypercomputer/docs/networking-overview" target="_blank">AWS and Azure have non-blocking fabrics but do not expose the hierarchy to the scheduler — placement is random</a>.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/machine-learning/training/multi-tier-checkpointing" target="_blank">Multi-Tier Checkpointing</a> — writes to local RAM disk, replicates to peer nodes, async-uploads to Cloud Storage. When a long-running job restarts, it pulls from the nearest tier: local SSD first, peer node next, GCS last.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/ai-hypercomputer/docs/workloads/enable-node-health-prediction" target="_blank">Node Health Prediction</a> — predicts which nodes will degrade in the next 5 hours based on metadata, heat, and packet integrity, and drains them before disruptive symptoms surface. SageMaker notifies after the fact.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://cloud.google.com/blog/products/networking/introducing-virgo-megascale-data-center-fabric" target="_blank">Optical Circuit Switching (Palomar)</a> — when a chip fails mid-job, OCS physically reroutes the topology around the failed chip without restarting. Anthropic uses this to survive daily failures across 1 million chips. For multi-day GROMACS runs, that is completion instead of restart.</li><li style="margin-bottom: 0; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://cloud.google.com/blog/products/ai-machine-learning/goodput-metric-as-measure-of-ml-productivity" target="_blank">Goodput</a> — paid compute hours that were actually productive. Google publishes this as a service-level indicator, and Cluster Director optimizes for it.</li></ul>' },
           ] : [
-            { body: 'All 6 backends complete. Identical scientific output across silicon. Side ladder shows $/predict per backend.' },
-            { body: 'TPU TCO/hr: 30% lower than GB200, 41% lower than GB300 (SemiAnalysis). MFU 40% TPU vs 30% GPU.\n\nAnthropic, OpenAI, Apple, Meta, Midjourney, Recursion Pharma — all chose TPU at scale.\n\nCaltech CI-FM: 10,000 drug-screening runs = $53k GPU vs $8.9k TPU.' },
-            { body: 'ESMFold-TPU: same PyTorch, one line changed. Identical pLDDT, identical PDB size.\n\nPurdue: 256-chip TPU pod ON-PREM with Slurm. AWS cannot deploy Trainium on-prem.' },
-            { body: '1. Pick the first burst workload (with David Hoover + Tim Miller)\n2. HPC benchmark: H4D + Cloud RDMA vs BioTeam\'s EFA test\n3. AlphaFold pilot on TPU v5e via STRIDES\n4. Architecture workshop: multi-region Slurm, Terraform blueprints, NIST 800-171 hardening\n\nZeke follows up with cost model + GPAR details.' },
+            { body: 'Inference complete — results content TBD.' },
           ]
         }
       />

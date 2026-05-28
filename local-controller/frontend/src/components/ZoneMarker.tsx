@@ -17,6 +17,7 @@ interface ZoneMarkerProps {
   state: MarkerState
   vms?: VMInfo[]
   onClick?: () => void
+  showHalo?: boolean
 }
 
 const VM_STATE_COLORS: Record<MarkerState, string> = {
@@ -27,13 +28,14 @@ const VM_STATE_COLORS: Record<MarkerState, string> = {
   done: '#09d3ac',
 }
 
-export default function ZoneMarker({ position, label, subtitle, subtitleHref, state, vms, onClick }: ZoneMarkerProps) {
+export default function ZoneMarker({ position, label, subtitle, subtitleHref, state, vms, onClick, showHalo }: ZoneMarkerProps) {
   const stateClass = state === 'done' ? 'marker-done' : state === 'active' ? 'marker-active' : state === 'provisioning' ? 'marker-provisioning' : state === 'failed' ? 'marker-failed' : ''
 
   return (
     <OverlayView position={position} mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}>
       <div className={`zone-marker-wrap ${stateClass}`} onClick={onClick}>
         <div className="marker-spinner-box">
+          {showHalo && <div className="marker-halo" />}
           <div className="rotatingBoxes1" />
           <div className="rotatingBoxes2" />
           <div className="rotatingBoxes3" />

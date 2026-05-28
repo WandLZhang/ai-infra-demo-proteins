@@ -30,6 +30,66 @@
   animation: terminalLineIn 0.15s ease-out backwards;
 }
 
+@keyframes infoBoxFadeIn {
+  from { opacity: 0; transform: translateY(4px); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+.info-content-wrap {
+  animation: infoBoxFadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Terminal box — sits on the left, extends from below the hamburger to above the location paper.
+   Darker border and scrollbar so it doesn't visually compete with the map content. */
+.terminal-box {
+  background: #000;
+  border: 1px solid #2a2a2a;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.2vmin;
+  color: #d3d3d3;
+  white-space: pre-wrap;
+  cursor: default;
+  padding: 12px;
+  overflow-y: auto;
+  scrollbar-color: #2a2a2a #0a0a0a;       /* Firefox: thumb track */
+  scrollbar-width: thin;                   /* Firefox */
+}
+.terminal-box::-webkit-scrollbar { width: 6px; }
+.terminal-box::-webkit-scrollbar-track { background: #0a0a0a; }
+.terminal-box::-webkit-scrollbar-thumb { background: #2a2a2a; }
+.terminal-box::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* Multi-region bucket label — sits over the cyan US polygon on the Catalog slide */
+@keyframes bucketLabelIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); filter: blur(8px); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1);    filter: blur(0); }
+}
+.bucket-label {
+  display: inline-block;          /* size tightly to text */
+  transform: translate(-50%, -50%);
+  background: #000;
+  border: 1px solid #09d3ac;
+  font-family: 'Courier New', Courier, monospace;
+  color: #09d3ac;
+  padding: 7px 12px;
+  white-space: nowrap;
+  box-shadow: 0 0 18px rgba(9, 211, 172, 0.35);
+  text-align: center;
+  pointer-events: none;
+  animation: bucketLabelIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bucket-label-name {
+  font-size: 1.7vmin;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.bucket-label-meta {
+  font-size: 1.05vmin;
+  color: #708090;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+
 /* Zone markers — spinner + text box as separate elements (Jamal HUD style) */
 .zone-marker-wrap {
   display: flex;
@@ -56,6 +116,26 @@
   margin-left: 4px;
 }
 .marker-text-box b { font-weight: 700; }
+
+/* Zone cache halo — cyan ring around each marker on the catalog3 slide.
+   Visualizes Rapid Cache (SSD data) + Image Streaming (container files) landing zone-local. */
+@keyframes haloPulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    opacity: 0.45; }
+  50%      { transform: translate(-50%, -50%) scale(1.15); opacity: 0.85; }
+}
+.marker-halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  border: 1.5px solid #09d3ac;
+  border-radius: 50%;
+  box-shadow: 0 0 16px rgba(9, 211, 172, 0.45), inset 0 0 12px rgba(9, 211, 172, 0.25);
+  pointer-events: none;
+  z-index: 0;
+  animation: haloPulse 2.2s ease-in-out infinite;
+}
 
 .rotatingBoxes1 { animation: rotatingBoxesAnim1 2.5s ease infinite; border: 1px solid grey; position: absolute; inset: 0; }
 .rotatingBoxes2 { animation: rotatingBoxesAnim2 2.25s ease infinite; border: 1px solid lightgrey; position: absolute; inset: 0; }
