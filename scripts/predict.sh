@@ -10,6 +10,15 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+# Guard: skip if jobs are already running (prevents double-submission from frontend)
+if command -v squeue &>/dev/null; then
+  RUNNING=$(squeue --noheader --partition=tpu,gpu,spot-tpu,spot-gpu 2>/dev/null | wc -l)
+  if [[ "$RUNNING" -gt 0 ]]; then
+    echo "predict.sh: $RUNNING jobs already in queue — skipping"
+    exit 0
+  fi
+fi
+
 PROTEIN_ID="${1:-hemoglobin}"
 JOB_DIR="$SHARED_BUCKET/job"
 
