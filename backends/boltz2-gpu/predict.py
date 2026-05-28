@@ -25,7 +25,8 @@ def predict_boltz2_gpu(fasta_path: str, out_dir: str, sampling_steps: int = 50) 
         dict with keys: cif_path, cif_chars, atom_count, elapsed_s
     """
     if os.path.exists(out_dir):
-        shutil.rmtree(out_dir)
+        shutil.rmtree(out_dir, ignore_errors=True)
+        os.makedirs(out_dir, exist_ok=True)
 
     sys.argv = [
         "boltz", "predict", fasta_path,
