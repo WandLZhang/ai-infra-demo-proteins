@@ -1,0 +1,16 @@
+node_modules
+test-results
+playwright-report
+.git
+.env
+.env.*
+*.log
+src
+public
+tests
+*.ts
+*.tsx
+package*.json
+tsconfig.json
+vite.config.ts
+playwright.config.ts
