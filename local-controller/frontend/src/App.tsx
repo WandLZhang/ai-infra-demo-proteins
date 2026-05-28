@@ -19,7 +19,7 @@ const PROTEINS: Protein[] = [
 ]
 
 // UX phases: zoomed on Building 12 → terminal → submit → zoom out → catalog → catalog2 → results
-type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'done'
+type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'pd1' | 'pd2' | 'img' | 'gen' | 'done'
 
 function initLaneStatus(backendId: BackendId): LaneStatus {
   const b = BACKENDS.find(b => b.id === backendId)!
@@ -42,10 +42,21 @@ export default function App() {
   const [zoneStates, setZoneStates] = useState<Record<string, MarkerState>>({})
   const [vmStates, setVmStates] = useState<Record<string, { name: string, zone: string, state: string, href: string }>>({})
 
+  const isMd = phase === 'md1' || phase === 'md2' || phase === 'md3'
+  const isPd1 = phase === 'pd1'  // pd1 stays zoomed on us-central1 with Hyperdisk hub
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
-    : { lat: 39.5, lng: -98.35 }
-  const mapZoom = phase === 'home' ? 12 : 5
+    : isMd || isPd1
+      ? { lat: 41.2588, lng: -95.8519 }    // us-central1 (Council Bluffs, IA)
+      : { lat: 39.5, lng: -98.35 }
+  const mapZoom = phase === 'home' ? 12 : isMd || isPd1 ? 6 : 5
+  const mdLayer: 'storage' | 'compute' | 'topology' | null =
+    phase === 'md1' ? 'storage' :
+    phase === 'md2' ? 'compute' :
+    phase === 'md3' ? 'topology' : null
+  const showHyperdiskHub = phase === 'pd1'
+  const showPartitionChips = phase === 'pd2'
+  const showSliceViz = phase === 'img'
 
   const lastEventCount = useRef(0)
   const terminalRef = useRef<HTMLDivElement>(null)
@@ -264,11 +275,19 @@ export default function App() {
         else if (phase === 'catalog4') setPhase('md1')
         else if (phase === 'md1') setPhase('md2')
         else if (phase === 'md2') setPhase('md3')
-        // 'md3' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
+        else if (phase === 'md3') setPhase('pd1')
+        else if (phase === 'pd1') setPhase('pd2')
+        else if (phase === 'pd2') setPhase('img')
+        else if (phase === 'img') setPhase('gen')
+        // 'gen' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
         // 'done' stays
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        if (phase === 'done') setPhase('md3')
+        if (phase === 'done') setPhase('gen')
+        else if (phase === 'gen') setPhase('img')
+        else if (phase === 'img') setPhase('pd2')
+        else if (phase === 'pd2') setPhase('pd1')
+        else if (phase === 'pd1') setPhase('md3')
         else if (phase === 'md3') setPhase('md2')
         else if (phase === 'md2') setPhase('md1')
         else if (phase === 'md1') setPhase('catalog4')
@@ -289,7 +308,7 @@ export default function App() {
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#171717', overflow: 'hidden', position: 'relative' }}>
       {/* Fullscreen map — zoom driven by phase */}
-      <InfraMap lanes={lanes} zoneStates={zoneStates} vmStates={vmStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} highlightUS={phase === 'catalog' || phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4'} showSpokes={phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4'} showHalos={phase === 'catalog3' || phase === 'catalog4'} />
+      <InfraMap lanes={lanes} zoneStates={zoneStates} vmStates={vmStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} highlightUS={phase === 'catalog' || phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4' || phase === 'img'} showSpokes={phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4'} showHalos={phase === 'catalog3' || phase === 'catalog4'} mdLayer={mdLayer} showHyperdiskHub={showHyperdiskHub} showPartitionChips={showPartitionChips} showSliceViz={showSliceViz} />
 
       {/* Top-left: Hamburger menu */}
       <div style={{ position: 'fixed', top: 15, left: 15, zIndex: 25 }}>
@@ -416,6 +435,10 @@ export default function App() {
           phase === 'md1' ? 'Molecular Dynamics' :
           phase === 'md2' ? 'H4D + Cloud RDMA (Falcon)' :
           phase === 'md3' ? 'Five MPI-Specific Google Features' :
+          phase === 'pd1' ? 'Protein Design & Structure' :
+          phase === 'pd2' ? 'Consumption Models' :
+          phase === 'img' ? 'Biomedical Image Analysis' :
+          phase === 'gen' ? 'Genomics & Sequence Analysis' :
           'Results'
         }
         sections={
@@ -446,7 +469,20 @@ export default function App() {
           ] :
           phase === 'md3' ? [
             { body: 'MD is the canonical case for five MPI-specific Google features. Each is unique to Google Cloud:\n\n<ul style="margin: 8px 0; padding-left: 18px; list-style-type: none;"><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/cluster-director/docs/orchestration" target="_blank">Topology-aware Slurm via Cluster Director</a> — the physical network has rack/block/cluster tiers. Cluster Director exposes the hierarchy to Slurm so MPI ranks co-locate on the same rack. <a href="https://docs.cloud.google.com/ai-hypercomputer/docs/networking-overview" target="_blank">AWS and Azure have non-blocking fabrics but do not expose the hierarchy to the scheduler — placement is random</a>.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/machine-learning/training/multi-tier-checkpointing" target="_blank">Multi-Tier Checkpointing</a> — writes to local RAM disk, replicates to peer nodes, async-uploads to Cloud Storage. When a long-running job restarts, it pulls from the nearest tier: local SSD first, peer node next, GCS last.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/ai-hypercomputer/docs/workloads/enable-node-health-prediction" target="_blank">Node Health Prediction</a> — predicts which nodes will degrade in the next 5 hours based on metadata, heat, and packet integrity, and drains them before disruptive symptoms surface. SageMaker notifies after the fact.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://cloud.google.com/blog/products/networking/introducing-virgo-megascale-data-center-fabric" target="_blank">Optical Circuit Switching (Palomar)</a> — when a chip fails mid-job, OCS physically reroutes the topology around the failed chip without restarting. Anthropic uses this to survive daily failures across 1 million chips. For multi-day GROMACS runs, that is completion instead of restart.</li><li style="margin-bottom: 0; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://cloud.google.com/blog/products/ai-machine-learning/goodput-metric-as-measure-of-ml-productivity" target="_blank">Goodput</a> — paid compute hours that were actually productive. Google publishes this as a service-level indicator, and Cluster Director optimizes for it.</li></ul>' },
-          ] : [
+          ] :
+          phase === 'pd1' ? [
+            { body: 'Apps in scope: RFdiffusion, BindCraft, ModelAngelo, AlphaFold. <b>Embarrassingly parallel</b> — each candidate runs independently. Inputs are small (sequences in KB), compute is large. The textbook batch-screening profile.\n\nModel weights are served from <a href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/hyperdisk-ml" target="_blank">Hyperdisk ML</a>, a zonal read-only-many volume. <b>One volume serves 2,500 instances at 1.2 TiB/s aggregate, with 11.9× faster model loading than direct GCS</b>.\n\nOne layer up at the host, <a href="https://cloud.google.com/kubernetes-engine/docs/concepts/fast-starting-nodes" target="_blank">BoltVMs</a> are pre-initialized GPU nodes that keep the boot, driver, and container runtime warm — <b>H100 cold-start drops from 15 minutes to 2</b>.\n\nAnd at the workload layer, <a href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/checkpoint-restore" target="_blank">Pod Snapshots</a> snapshot full pod state and restore in seconds — <b>80% faster warm restart for a 70B-parameter model</b>. Standard K8s pod restart in EKS or AKS reloads model weights from scratch.' },
+          ] :
+          phase === 'pd2' ? [
+            { body: 'The background sbatch demo follows the Protein Design workload pattern, dispatching across consumption models:\n\n<ul style="margin: 8px 0; padding-left: 18px; list-style-type: none;"><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dws" target="_blank">DWS Flex Start</a> — <b>guaranteed GPU or TPU capacity for up to 7 days per request</b>, with no reservation contract or minimum commitment. AWS Capacity Blocks require fixed-duration commitment and rigid sizing. AWS also <a href="https://www.datacenterknowledge.com/cloud/aws-raises-h200-prices" target="_blank">raised H200 prices 15%</a> recently.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/compute/docs/instances/future-reservations-calendar-mode-overview" target="_blank">Calendar Mode</a> — pick a start date and lock in guaranteed capacity for <b>up to 90 days</b>. Useful for runs planned against grant milestones.</li><li style="margin-bottom: 0; padding-left: 12px; border-left: 2px solid #2a2a2a;"><b>Multi-region Spot</b> — at any given moment, Google has thousands of GPU chips across CONUS Spot pools. With <code>--requeue</code>, jobs resume from the last checkpoint after preemption. The disk is not reclaimed, only the host.</li></ul>Google\'s <a href="https://cloud.google.com/blog/products/containers-kubernetes/whats-new-in-gke-at-next26" target="_blank">GKE hypercluster</a>, in private GA from Cloud Next \'26, <b>manages 1 million chips across 256,000 nodes spanning multiple regions under a single control plane</b>. AWS announced EKS at 100,000 nodes in July 2025.\n\n<a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-compute-classes" target="_blank">Custom Compute Classes</a> act as the routing policy engine across all five workload categories — Cryo-EM heads to GPU, MD to H4D, Protein Design fans across TPU+GPU, Image Analysis to G4 fractional, Genomics to Cloud Batch — without the researcher choosing the backend.' },
+          ] :
+          phase === 'img' ? [
+            { body: 'Apps in scope: nnU-Net, DeepLabCut, DeepMedic, DeepCell-tf. GPU-hungry training and inference. Training datasets follow the same staging pattern as Cryo-EM — multi-region GCS, FUSE mount, same <code>/data/</code> paths across regions.\n\nNot every model needs a full H100. <a href="https://docs.cloud.google.com/compute/docs/accelerator-optimized-machines#g4-series" target="_blank">G4 fractional GPUs</a> carve up an NVIDIA RTX PRO 6000 Blackwell (96 GB total) into <b>1/8 (12 GB), 1/4 (24 GB), or 1/2 (48 GB) slices via vGPU</b>. MIG mode adds up to 7 partitions per GPU on top. AWS G5g ships whole L4 instances only — no native fractional split. Azure NCv supports MIG but does not offer vGPU sub-VM shapes.\n\nFor clinical inference — radiology endpoints, real-time microscopy — <a href="https://cloud.google.com/run/docs/configuring/services/gpu" target="_blank">Cloud Run with GPUs</a> serves the fine-tuned model as a managed endpoint. <b>L4 (24 GB) or RTX PRO 6000 Blackwell (96 GB), 5-second cold start, scale-to-zero, per-second billing</b>. AWS Lambda has no GPU support. AWS App Runner has no GPU support. Azure Container Apps GPU is preview-only.' },
+          ] :
+          phase === 'gen' ? [
+            { body: 'Apps in scope: SpliceAI, DanQ, Saturn, plus the Nextflow / nf-core pipelines. This category is <b>already cloud-native</b> — Nextflow\'s <code>gs://</code> URIs define every datasource directly, with no manual staging or FUSE mounts.\n\n<a href="https://docs.cloud.google.com/batch/docs/nextflow" target="_blank">Nextflow on Cloud Batch</a> runs nf-core workflows on Cloud Batch with <b>DWS Flex guaranteeing GPUs underneath</b> — same DSL, managed infrastructure. AWS Batch also runs Nextflow but lacks the 7-day DWS Flex GPU guarantee.' },
+          ] :
+          [
             { body: 'Inference complete — results content TBD.' },
           ]
         }
