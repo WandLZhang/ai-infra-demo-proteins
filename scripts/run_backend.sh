@@ -111,41 +111,8 @@ rm -f "$FASTA_PATH" "/tmp/${BACKEND_ID}.log" 2>/dev/null || true
 echo ">A|protein" > "$FASTA_PATH"
 echo "$SEQUENCE" >> "$FASTA_PATH"
 
-# Kill combined TPU model server before AF2-TPU (JAX needs exclusive VFIO + clean PJRT state)
-if [[ "$BACKEND_ID" == "af2-tpu" ]]; then
-  pkill -9 -f "tpu-model-server" 2>/dev/null || true
-  pkill -9 -f "server.py" 2>/dev/null || true
-  pkill -9 -f "python3" 2>/dev/null || true
-  sleep 3
-  pkill -9 -f "libtpu" 2>/dev/null || true
-  rm -f /tmp/libtpu_lockfile 2>/dev/null || true
-  sleep 2
-fi
-
-# Start + wait for model server before ESMFold-TPU or Boltz2-TPU (needs warm server)
-if [[ "$BACKEND_ID" == "esmfold-tpu" ]] && ! curl -sf http://localhost:8090/ > /dev/null 2>&1; then
-  echo "[run_backend] starting TPU model server for ESMFold..."
-  pkill -f "python3.*predict.py" 2>/dev/null || true
-  rm -f /tmp/libtpu_lockfile 2>/dev/null || true
-  cd /opt/backends && PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz \
-    nohup python3 /opt/backends/tpu-model-server.py > /tmp/tpu-model-server.log 2>&1 &
-  for i in $(seq 1 90); do
-    curl -sf http://localhost:8090/ > /dev/null 2>&1 && break
-    sleep 1
-  done
-  if curl -sf http://localhost:8090/ > /dev/null 2>&1; then
-    echo "[run_backend] server ready, warming $PROTEIN_ID..."
-    curl -sf -m 300 -X POST localhost:8090/predict \
-      -H "Content-Type: application/json" \
-      -d "{\"sequence\":\"$SEQUENCE\",\"out_path\":\"/tmp/esm_inline_warmup.pdb\"}" > /dev/null 2>&1
-    echo "[run_backend] ESMFold warmed for $PROTEIN_ID"
-    nohup curl -sf -m 600 -X POST localhost:8091/predict \
-      -H "Content-Type: application/json" \
-      -d "{\"fasta_path\":\"$FASTA_PATH\",\"out_dir\":\"/tmp/boltz_inline_warmup\",\"sampling_steps\":10}" > /dev/null 2>&1 &
-  else
-    echo "[run_backend] server failed to start, falling back to direct inference"
-  fi
-fi
+# AF2-TPU runs on a SEPARATE TPU VM (east5b) — no VFIO conflict with model server.
+# ESMFold-TPU and Boltz2-TPU run on east5a where the model server stays warm.
 
 # ── Phase 1: Allocating ─────────────────────────────────────────────
 log_event "allocate" "allocating on $VM_NAME ($SILICON)"
@@ -226,6 +193,6 @@ if [[ "$SILICON" == "tpu" ]]; then
   pkill -f "python3.*predict.py" 2>/dev/null || true
   pkill -f "libtpu" 2>/dev/null || true
   rm -f /tmp/libtpu_lockfile 2>/dev/null || true
-  # Server restart is handled by the ESMFold-TPU job's prolog (above)
-  # After the last TPU job, health cron will warm all 6 proteins in background
+  # Model server stays on east5a perpetually. AF2-TPU runs on east5b (separate VFIO).
+  # Health cron handles server restarts + warmup.
 fi
