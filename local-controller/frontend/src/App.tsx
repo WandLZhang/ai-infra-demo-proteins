@@ -252,16 +252,16 @@ export default function App() {
     try {
       const result = await submitRun(currentProtein.id)
       if (result.already_running) {
+        // Jobs in flight — just watch them
         setPhase('running')
-        startPolling()
-        return
+      } else {
+        // New run — clean slate
+        setDispatchLines([])
+        setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
+        setZoneStates({})
+        setVmStates({})
+        setPhase('running')
       }
-      setPhase('dispatching')
-      setDispatchLines([])
-      setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
-      setZoneStates({})
-      setVmStates({})
-      setPhase('running')
       startPolling()
     } catch (err) {
       console.error('Submit failed:', err)
