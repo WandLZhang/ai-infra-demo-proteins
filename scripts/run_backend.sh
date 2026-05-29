@@ -111,12 +111,15 @@ rm -f "$FASTA_PATH" "/tmp/${BACKEND_ID}.log" 2>/dev/null || true
 echo ">A|protein" > "$FASTA_PATH"
 echo "$SEQUENCE" >> "$FASTA_PATH"
 
-# Kill combined TPU model server before AF2-TPU (JAX needs exclusive VFIO)
+# Kill combined TPU model server before AF2-TPU (JAX needs exclusive VFIO + clean PJRT state)
 if [[ "$BACKEND_ID" == "af2-tpu" ]]; then
-  pkill -f "tpu-model-server" 2>/dev/null || true
-  pkill -f "server.py" 2>/dev/null || true
-  sleep 2
+  pkill -9 -f "tpu-model-server" 2>/dev/null || true
+  pkill -9 -f "server.py" 2>/dev/null || true
+  pkill -9 -f "python3" 2>/dev/null || true
+  sleep 3
+  pkill -9 -f "libtpu" 2>/dev/null || true
   rm -f /tmp/libtpu_lockfile 2>/dev/null || true
+  sleep 2
 fi
 
 # Start + wait for model server before ESMFold-TPU or Boltz2-TPU (needs warm server)
