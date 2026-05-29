@@ -113,7 +113,6 @@ sleep "$SPOT_WAIT"
 
 # ── Phase 2: Check results, resubmit failures to guaranteed ──
 echo "Phase 2: checking Spot results..."
-PREV_TPU_JOB=""
 for BACKEND in "${BACKENDS[@]}"; do
   JOB_ID="${SPOT_JOBS[$BACKEND]}"
   JOB_STATE=$(scontrol show job "$JOB_ID" 2>/dev/null | grep -oP 'JobState=\K\S+')
@@ -131,19 +130,13 @@ for BACKEND in "${BACKENDS[@]}"; do
   if [[ "$SILICON" == "tpu" ]]; then PARTITION="tpu"; else PARTITION="gpu"; fi
 
   JOB_CMD=$(build_wrap "$BACKEND")
-  DEP_FLAG=""
-  if [[ "$SILICON" == "tpu" && -n "$PREV_TPU_JOB" ]]; then
-    DEP_FLAG="--dependency=afterany:$PREV_TPU_JOB"
-  fi
   NEW_JOB_ID=$(sbatch --parsable \
     --partition="$PARTITION" \
-    $DEP_FLAG \
     --job-name="${BACKEND}" \
     --output="/dev/null" \
     --error="/dev/null" \
     --wrap="$JOB_CMD" 2>&1)
-  if [[ "$SILICON" == "tpu" ]]; then PREV_TPU_JOB="$NEW_JOB_ID"; fi
-  echo "  $BACKEND → $PARTITION (job $NEW_JOB_ID)${DEP_FLAG:+ [dep:$PREV_TPU_JOB]}"
+  echo "  $BACKEND → $PARTITION (job $NEW_JOB_ID)"
 
   TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   SEQ="$(date +%s%N)"
