@@ -193,6 +193,24 @@ def predict_boltz2_tpu(fasta_path: str, out_dir: str, sampling_steps: int = 10) 
     return result
 
 
+def _try_server(fasta_path: str, out_dir: str, sampling_steps: int = 10) -> dict | None:
+    """Try the warm Boltz-2 model server. Returns None if server is down."""
+    import json
+    import urllib.request
+    import urllib.error
+    payload = json.dumps({"fasta_path": fasta_path, "out_dir": out_dir, "sampling_steps": sampling_steps}).encode()
+    req = urllib.request.Request(
+        f"http://localhost:{os.environ.get('BOLTZ_PORT', 8091)}/predict",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, ConnectionRefusedError, OSError):
+        return None
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Boltz-2 TPU inference")
@@ -201,8 +219,16 @@ if __name__ == "__main__":
     parser.add_argument("--sampling-steps", type=int, default=10)
     args = parser.parse_args()
 
-    result = predict_boltz2_tpu(args.fasta, args.out_dir, args.sampling_steps)
-    print(f"\nBoltz-2 TPU: {result['elapsed_s']:.1f}s")
-    print(f"CIF: {result['cif_path']}")
-    print(f"Size: {result['cif_chars']} chars, ATOMs: {result['atom_count']}")
-    print("STATUS:", "PASS" if result["cif_path"] else "FAIL")
+    server_result = _try_server(args.fasta, args.out_dir, args.sampling_steps)
+    if server_result and server_result.get("cif_path"):
+        print(f"[boltz2-tpu] using warm server")
+        result = server_result
+        result["atom_count"] = 0
+    else:
+        print(f"[boltz2-tpu] server not available, direct inference")
+        result = predict_boltz2_tpu(args.fasta, args.out_dir, args.sampling_steps)
+
+    print(f"\nBoltz-2 TPU: {result.get('elapsed_s', 0):.1f}s")
+    print(f"CIF: {result.get('cif_path')}")
+    print(f"Size: {result.get('cif_chars', 0)} chars, ATOMs: {result.get('atom_count', 0)}")
+    print("STATUS:", "PASS" if result.get("cif_path") else "FAIL")

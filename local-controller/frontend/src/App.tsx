@@ -238,19 +238,19 @@ export default function App() {
   }, [dispatchLines])
 
   const handleSubmit = useCallback(async () => {
-    setPhase('dispatching')
-        setDispatchLines([])
-    setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
-    setZoneStates({})
-    setVmStates({})
-
     try {
       const result = await submitRun(currentProtein.id)
       if (result.already_running) {
         setPhase('running')
-      } else {
-        setPhase('running')
+        startPolling()
+        return
       }
+      setPhase('dispatching')
+      setDispatchLines([])
+      setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
+      setZoneStates({})
+      setVmStates({})
+      setPhase('running')
       startPolling()
     } catch (err) {
       console.error('Submit failed:', err)
@@ -486,7 +486,7 @@ export default function App() {
             { body: 'The background sbatch demo follows the Protein Design workload pattern, dispatching across consumption models:\n\n<ul style="margin: 8px 0; padding-left: 18px; list-style-type: none;"><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dws" target="_blank">DWS Flex Start</a> — <b>guaranteed GPU or TPU capacity for up to 7 days per request</b>, with no reservation contract or minimum commitment. AWS Capacity Blocks require fixed-duration commitment and rigid sizing. AWS also <a href="https://www.datacenterknowledge.com/cloud/aws-raises-h200-prices" target="_blank">raised H200 prices 15%</a> recently.</li><li style="margin-bottom: 10px; padding-left: 12px; border-left: 2px solid #2a2a2a;"><a href="https://docs.cloud.google.com/compute/docs/instances/future-reservations-calendar-mode-overview" target="_blank">Calendar Mode</a> — pick a start date and lock in guaranteed capacity for <b>up to 90 days</b>. Useful for runs planned against grant milestones.</li><li style="margin-bottom: 0; padding-left: 12px; border-left: 2px solid #2a2a2a;"><b>Multi-region Spot</b> — at any given moment, Google has thousands of GPU chips across CONUS Spot pools. With <code>--requeue</code>, jobs resume from the last checkpoint after preemption. The disk is not reclaimed, only the host.</li></ul>Google\'s <a href="https://cloud.google.com/blog/products/containers-kubernetes/whats-new-in-gke-at-next26" target="_blank">GKE hypercluster</a>, in private GA from Cloud Next \'26, <b>manages 1 million chips across 256,000 nodes spanning multiple regions under a single control plane</b>. AWS announced EKS at 100,000 nodes in July 2025.\n\n<a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-compute-classes" target="_blank">Custom Compute Classes</a> act as the routing policy engine across all five workload categories — Cryo-EM heads to GPU, MD to H4D, Protein Design fans across TPU+GPU, Image Analysis to G4 fractional, Genomics to Cloud Batch — without the researcher choosing the backend.' },
           ] :
           phase === 'img' ? [
-            { body: 'Apps in scope: nnU-Net, DeepLabCut, DeepMedic, DeepCell-tf. GPU-hungry training and inference. Training datasets follow the same staging pattern as Cryo-EM — multi-region GCS, FUSE mount, same <code>/data/</code> paths across regions.\n\nNot every model needs a full H100. <a href="https://docs.cloud.google.com/compute/docs/accelerator-optimized-machines#g4-series" target="_blank">G4 fractional GPUs</a> carve up an NVIDIA RTX PRO 6000 Blackwell (96 GB total) into <b>1/8 (12 GB), 1/4 (24 GB), or 1/2 (48 GB) slices via vGPU</b>. MIG mode adds up to 7 partitions per GPU on top. AWS G5g ships whole L4 instances only — no native fractional split. Azure NCv supports MIG but does not offer vGPU sub-VM shapes.\n\nFor clinical inference — radiology endpoints, real-time microscopy — <a href="https://cloud.google.com/run/docs/configuring/services/gpu" target="_blank">Cloud Run with GPUs</a> serves the fine-tuned model as a managed endpoint. <b>L4 (24 GB) or RTX PRO 6000 Blackwell (96 GB), 5-second cold start, scale-to-zero, per-second billing</b>. AWS Lambda has no GPU support. AWS App Runner has no GPU support. Azure Container Apps GPU is preview-only.' },
+            { body: 'Apps in scope: nnU-Net, DeepLabCut, DeepMedic, DeepCell-tf. GPU-hungry training and inference. Training datasets follow the same staging pattern as Cryo-EM — multi-region GCS, FUSE mount, same <code>/data/</code> paths across regions.\n\nNot every model needs a full H100. <a href="https://docs.cloud.google.com/compute/docs/accelerator-optimized-machines#g4-series" target="_blank">G4 fractional GPUs</a> carve up an NVIDIA RTX PRO 6000 Blackwell (96 GB total) into <b>1/8 (12 GB), 1/4 (24 GB), or 1/2 (48 GB) slices via vGPU</b>. MIG mode adds up to 7 partitions per GPU on top. AWS G5g ships whole L4 instances only — no native fractional split. Azure NCv supports MIG but does not offer vGPU sub-VM shapes.\n\nFor clinical inference — radiology endpoints, real-time microscopy — <a href="https://cloud.google.com/run/docs/configuring/services/gpu" target="_blank">Cloud Run with GPUs</a> serves the fine-tuned model as a managed endpoint. <b>L4 (24 GB) or RTX PRO 6000 Blackwell (96 GB), 5-second cold start, scale-to-zero, per-second billing</b>. AWS Lambda has no GPU support. AWS App Runner has no GPU support. <a href="https://learn.microsoft.com/en-us/azure/container-apps/gpu-serverless-overview" target="_blank">Azure Container Apps Serverless GPU</a> caps at A100 80 GB — Cloud Run\'s RTX PRO 6000 Blackwell at <b>96 GB</b> is the only serverless option above that.' },
           ] :
           phase === 'gen' ? [
             { body: 'Apps in scope: SpliceAI, DanQ, Saturn, plus the Nextflow / nf-core pipelines. This category is <b>already cloud-native</b> — Nextflow\'s <code>gs://</code> URIs define every datasource directly, with no manual staging or FUSE mounts.\n\n<a href="https://docs.cloud.google.com/batch/docs/nextflow" target="_blank">Nextflow on Cloud Batch</a> runs nf-core workflows on Cloud Batch with <b>DWS Flex guaranteeing GPUs underneath</b> — same DSL, managed infrastructure. AWS Batch also runs Nextflow but lacks the 7-day DWS Flex GPU guarantee.' },
