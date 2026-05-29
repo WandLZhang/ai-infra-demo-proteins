@@ -5,6 +5,15 @@
 
 CONTAINER=slurmd
 
+# Disk cleanup — prevent filling up
+DISK_PCT=$(df / --output=pcent | tail -1 | tr -d ' %')
+if [[ "$DISK_PCT" -gt 85 ]]; then
+  echo "$(date) disk at ${DISK_PCT}%, cleaning..."
+  docker exec $CONTAINER bash -c 'rm -rf /tmp/b2w_out* /tmp/boltz_warmup* /tmp/result-* /tmp/*.fasta /tmp/*.pdb /root/.cache/pip /tmp/pip-* 2>/dev/null; find /usr/local/lib/python3.10/dist-packages -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null' 2>/dev/null
+  journalctl --vacuum-size=10M 2>/dev/null
+  echo "$(date) disk now at $(df / --output=pcent | tail -1 | tr -d ' %')%"
+fi
+
 # Is container running?
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   echo "$(date) container not running"
