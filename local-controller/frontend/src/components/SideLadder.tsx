@@ -22,15 +22,21 @@ function stateLabel(state: string): string {
 }
 
 export default function SideLadder({ lanes, onSelect }: SideLadderProps) {
-  const doneLanes = BACKENDS.map(b => ({ b, lane: lanes[b.id] })).filter(x => x.lane.state === 'done' && x.lane.costAccumulated > 0)
-  const cheapest = doneLanes.length > 0 ? Math.min(...doneLanes.map(x => x.lane.costAccumulated)) : null
+  const pairId = (id: string) => {
+    const [model, silicon] = [id.replace(/-tpu$|-gpu$/, ''), id.endsWith('-tpu') ? 'tpu' : 'gpu']
+    return `${model}-${silicon === 'tpu' ? 'gpu' : 'tpu'}` as BackendId
+  }
 
   return (
     <div className="sideLadderWrapper">
       {BACKENDS.map(b => {
         const lane = lanes[b.id]
         const cost = lane.costAccumulated
-        const ratio = cheapest && cost > 0 ? cost / cheapest : null
+        const counterpartId = pairId(b.id)
+        const counterpart = lanes[counterpartId]
+        const bothDone = lane.state === 'done' && counterpart?.state === 'done' && cost > 0 && counterpart.costAccumulated > 0
+        const pairCheapest = bothDone ? Math.min(cost, counterpart.costAccumulated) : null
+        const ratio = pairCheapest ? cost / pairCheapest : null
 
         let borderColor = 'rgba(255, 255, 255, 0.2)'
         if (lane.state !== 'idle' && lane.state !== 'done' && lane.state !== 'failed') {
