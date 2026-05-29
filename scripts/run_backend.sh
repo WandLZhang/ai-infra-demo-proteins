@@ -205,11 +205,24 @@ if [[ "$SILICON" == "tpu" ]]; then
     cd /opt/backends && PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz \
       nohup python3 /opt/backends/tpu-model-server.py > /tmp/tpu-model-server.log 2>&1 &
     echo "[run_backend] restarted combined TPU model server (pid $!)"
-    # Wait for server to load models (~45s) before ESMFold-TPU job starts
-    for i in $(seq 1 60); do
-      curl -sf http://localhost:8090/healthz > /dev/null 2>&1 && break
+    # Wait for server to load models (~60s)
+    for i in $(seq 1 90); do
+      curl -sf http://localhost:8090/ > /dev/null 2>&1 && break
       sleep 1
     done
-    echo "[run_backend] TPU model server ready"
+    echo "[run_backend] TPU model server ready, warming current protein..."
+    # Warm ESMFold for THIS protein's sequence (compiles XLA ops for this shape)
+    curl -sf -m 300 -X POST localhost:8090/predict \
+      -H "Content-Type: application/json" \
+      -d "{\"sequence\":\"$SEQUENCE\",\"out_path\":\"/tmp/esm_inline_warmup.pdb\"}" > /dev/null 2>&1
+    echo "[run_backend] ESMFold warmed for $PROTEIN_ID (${#SEQUENCE}aa)"
+    # Warm Boltz-2 for this protein (in background — runs during ESMFold-TPU job)
+    WARMUP_FASTA="/tmp/boltz_inline_warmup.fasta"
+    echo ">A|protein" > "$WARMUP_FASTA"
+    echo "$SEQUENCE" >> "$WARMUP_FASTA"
+    nohup curl -sf -m 600 -X POST localhost:8091/predict \
+      -H "Content-Type: application/json" \
+      -d "{\"fasta_path\":\"$WARMUP_FASTA\",\"out_dir\":\"/tmp/boltz_inline_warmup\",\"sampling_steps\":10}" > /dev/null 2>&1 &
+    echo "[run_backend] Boltz-2 warmup for $PROTEIN_ID started in background"
   fi
 fi

@@ -1,0 +1,65 @@
+#!/bin/bash
+# tpu-warmup-all.sh — Pre-compiles XLA ops for ALL 6 demo proteins on both models.
+# Run inside the slurmd container AFTER the combined model server is ready.
+# Takes ~28 min total (ESMFold ~7min + Boltz-2 ~21min).
+
+set -uo
+
+SEQUENCES=(
+  "NAMEESVSREKPELTASTERVNKRMSLVLNQHSSRSEVFPEVSIFVDKRPESSRLSEAIRKQHVAMLISELPDHTSSLRQINEQLKVHQEETHLASCDPQRRSYLEFQQFNGIDSKVTKESLYFILAENLHDQYFDGRSLKLNKPFVCSKRVQCSCQKFKEATAVQGLHTQCFNQTPLRDDQDMVETDVWQLSNLECNTLQKLTSDIYQELAQTFGFLDVLWQCSKAGHQGLEKYLDTYLNHTFKQSQLEATLQGFKTDL"
+  "SSSVPSQKTYQGSYGFRLGFLHSGTAKSVTCTYSPALNKMFCQLAKTCPVQLWVDSTPPPGTRVRAMAIYKQSQHMTEVVRRCPHERCTEGDGLAPPQHLIRVEGNLHAEYLDDKQTKFPQELPHRINKRPELKQIRKR"
+  "STIEEQAKTFLDKFNHEAEDLFYQSSLASWNYNTNITEENVQNMNNAGDKWSAFLKEQSTLAQMYPLQEIQNLTVKLQLQALQQNGSSVLSEDKSKRLNTILNTMSTIYSTGKVCNPDNPQECLLLEPGLNEIMANSLDYNERLWAWESWRSEVGKQLRPLYEEYVVLKNEMARANHYEDYGDYWRGDYEVNGVDGYDYSRGQLIEDVEHTFEEIKPLYEHLHAYVRAKLMNAYPSYISPIGCLPAHLLGDMWGRFWTNLYSLTVPFGQKPNIDVTDAMVDQAWDAQRIFKEAEKFFVSVGLPNMTQGFWENSMLTDPGNVQKAVCHPTAWDLGKGDFRILMCTKVTMDDFLTAHHEMGHIQYDMAYAAQPFLLRNGANEGFHEAVGEIMSLSAATPKHLKSIGLLSPDFQEDNETEINFLLKQALTIVGTLPFTYMLEKWRWMVFKGEIPKDQWMKKWWEMKREIVGVVEPVPHDETYCDPASLFHVSNDYSFIRYYTRTLYQFQFQEALCQAAKHEGPLHKCDISNSTEAGQKLFNMLRLGKSEPWTLALENVVGAKNMNVRPLLNYFEPLFTWLKDQNKNSFVGWSTDWSPYAD"
+  "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR"
+  "LRELGQGSFGMVYEGNARDIIKGEAETRVAVKTVNESASLRERIEFLNEASVMKGFTCHHVVRLLGVVSKGQPTLVVMELMAHGDLKSYLRSLRPEAENNPGRPPPTLQEMIQMAAEIADGMAYLNAKKFVHRDLAARNCMVAH"
+  "FSLLGTPVLKDINFKIERGQLLAVAGSTGAGKTSLLMVIMGELEPSEGKIKHSGRISFCSQFSWIMPGTIKENIIFGVSYDEYRYRSVIKACQLEEDISKFAEKDNIVLGEGGITLSGGQRARISLARAVYKDADLYLLDSPFGYLDVLTEKEIFESCVCKLMANKTRILVTSKMEHLKKADKILILHEGSSYFYGTFSELQNLQPDFSSKLMGCDSFDQFSAERRNSILTETLHRFSLEGDAPVSWTETK"
+)
+NAMES=(brca1 p53 ace2 hemoglobin insulin cftr)
+
+# Wait for ESMFold server
+echo "[warmup] $(date) waiting for model server..."
+for i in $(seq 1 120); do
+  curl -sf http://localhost:8090/ > /dev/null 2>&1 && break
+  sleep 1
+done
+
+if ! curl -sf http://localhost:8090/ > /dev/null 2>&1; then
+  echo "[warmup] $(date) server not ready after 120s, aborting"
+  exit 1
+fi
+echo "[warmup] $(date) server ready"
+
+# Warm ESMFold for all 6 proteins
+echo "[warmup] $(date) warming ESMFold (6 proteins)..."
+for i in "${!NAMES[@]}"; do
+  NAME="${NAMES[$i]}"
+  SEQ="${SEQUENCES[$i]}"
+  RESULT=$(curl -s -m 300 -X POST localhost:8090/predict \
+    -H "Content-Type: application/json" \
+    -d "{\"sequence\":\"$SEQ\",\"out_path\":\"/tmp/warmup_esm_${NAME}.pdb\"}")
+  MS=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('solve_time_ms',0))" 2>/dev/null)
+  echo "[warmup] $(date) ESMFold $NAME: ${MS}ms"
+done
+
+# Wait for Boltz-2 server
+if ! curl -sf http://localhost:8091/ > /dev/null 2>&1; then
+  echo "[warmup] $(date) Boltz-2 server not ready, skipping"
+  exit 0
+fi
+
+# Warm Boltz-2 for all 6 proteins
+echo "[warmup] $(date) warming Boltz-2 (6 proteins)..."
+for i in "${!NAMES[@]}"; do
+  NAME="${NAMES[$i]}"
+  SEQ="${SEQUENCES[$i]}"
+  FASTA="/tmp/warmup_boltz_${NAME}.fasta"
+  echo ">A|protein" > "$FASTA"
+  echo "$SEQ" >> "$FASTA"
+  rm -rf "/tmp/warmup_boltz_${NAME}_out" 2>/dev/null
+  RESULT=$(curl -s -m 600 -X POST localhost:8091/predict \
+    -H "Content-Type: application/json" \
+    -d "{\"fasta_path\":\"$FASTA\",\"out_dir\":\"/tmp/warmup_boltz_${NAME}_out\",\"sampling_steps\":10}")
+  ELAPSED=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('elapsed_s',0))" 2>/dev/null)
+  echo "[warmup] $(date) Boltz-2 $NAME: ${ELAPSED}s"
+done
+
+echo "[warmup] $(date) ALL PROTEINS WARMED"

@@ -38,10 +38,9 @@ docker exec -d $CONTAINER bash -c 'cd /opt/backends && PJRT_DEVICE=TPU HF_HOME=/
 echo "$(date) waiting for server to load..."
 for i in $(seq 1 90); do
   if curl -sf http://localhost:8090/ > /dev/null 2>&1; then
-    echo "$(date) server ready, warming ESMFold..."
-    # Warm ESMFold
-    docker exec -d $CONTAINER bash -c 'curl -s -m 300 -X POST localhost:8090/predict -H "Content-Type: application/json" -d "{\"sequence\":\"MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR\",\"out_path\":\"/tmp/esm_warmup.pdb\"}" > /dev/null 2>&1 && echo "ESMFold warmed" >> /tmp/tpu-health.log; echo ">A|protein" > /tmp/b2w.fasta; echo MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR >> /tmp/b2w.fasta; curl -s -m 600 -X POST localhost:8091/predict -H "Content-Type: application/json" -d "{\"fasta_path\":\"/tmp/b2w.fasta\",\"out_dir\":\"/tmp/b2w_warmup\",\"sampling_steps\":10}" > /dev/null 2>&1 && echo "Boltz-2 warmed" >> /tmp/tpu-health.log'
-    echo "$(date) warmup started in background"
+    echo "$(date) server ready, warming all 6 proteins..."
+    docker exec -d $CONTAINER bash -c 'gsutil -q cp gs://wz-nih-demo-shared/scripts/tpu-warmup-all.sh /opt/scripts/tpu-warmup-all.sh 2>/dev/null; chmod +x /opt/scripts/tpu-warmup-all.sh 2>/dev/null; bash /opt/scripts/tpu-warmup-all.sh >> /tmp/tpu-warmup.log 2>&1'
+    echo "$(date) warmup started in background (~28 min for all 6 proteins)"
     exit 0
   fi
   sleep 1
