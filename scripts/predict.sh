@@ -130,13 +130,22 @@ for BACKEND in "${BACKENDS[@]}"; do
   if [[ "$SILICON" == "tpu" ]]; then PARTITION="tpu"; else PARTITION="gpu"; fi
 
   JOB_CMD=$(build_wrap "$BACKEND")
+  # Pin AF2-TPU to east5a-1 (dedicated JAX TPU, no model server conflict)
+  # ESMFold/Boltz2-TPU go to east5a-0 (model server node)
+  NODE_FLAG=""
+  if [[ "$BACKEND" == "af2-tpu" ]]; then
+    NODE_FLAG="--nodelist=nihprotein-tpuv6eeast5a-1"
+  elif [[ "$SILICON" == "tpu" ]]; then
+    NODE_FLAG="--nodelist=nihprotein-tpuv6eeast5a-0"
+  fi
   NEW_JOB_ID=$(sbatch --parsable \
     --partition="$PARTITION" \
+    $NODE_FLAG \
     --job-name="${BACKEND}" \
     --output="/dev/null" \
     --error="/dev/null" \
     --wrap="$JOB_CMD" 2>&1)
-  echo "  $BACKEND → $PARTITION (job $NEW_JOB_ID)"
+  echo "  $BACKEND → $PARTITION (job $NEW_JOB_ID)${NODE_FLAG:+ [$NODE_FLAG]}"
 
   TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   SEQ="$(date +%s%N)"
