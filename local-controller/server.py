@@ -73,6 +73,8 @@ def submit():
 
     if not all_idle and not all_complete:
         return jsonify({"already_running": True})
+
+    now = datetime.now(timezone.utc)
     bucket = get_bucket()
     trigger = {
         "protein_id": protein_id,

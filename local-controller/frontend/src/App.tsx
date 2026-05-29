@@ -273,7 +273,7 @@ export default function App() {
         e.preventDefault()
         if (phase === 'home') {
           // If a run is already in flight (user navigated back here), just go forward without re-submitting
-          const hasActiveRun = Object.values(lanes).some(l => l.state !== 'idle')
+          const hasActiveRun = Object.values(lanes).some(l => l.state !== 'idle' && l.state !== 'done' && l.state !== 'failed')
           if (hasActiveRun) setPhase('running')
           else handleSubmit()
         }
