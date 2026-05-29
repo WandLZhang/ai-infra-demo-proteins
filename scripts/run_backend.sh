@@ -6,7 +6,7 @@
 #
 # Usage: bash run_backend.sh <backend_id> <protein_id>
 
-set -uo pipefail
+set -uo
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh" 2>/dev/null || source /tmp/protein-demo/env.sh 2>/dev/null || true
 
@@ -39,6 +39,10 @@ fi
 
 LOG_DIR="$JOB_DIR/log"
 START_TIME=$(date +%s)
+
+# Point HuggingFace + Boltz caches to root's pre-warmed cache (HOME=/tmp in sbatch)
+export HF_HOME=/root/.cache/huggingface
+export BOLTZ_CACHE=/tmp/.boltz
 
 # Get VM identity — SLURMD_NODENAME is the Slurm node name (matches sched_allocate events).
 # For TPU VMs, the GCE instance name (from metadata) is the TPU worker name (t1v-n-...),
@@ -101,10 +105,26 @@ EOF
   echo "[${BACKEND_ID}] state → $STATE (${ELAPSED_MS}ms, \$$COST)"
 }
 
-# Write FASTA file for this job
+# Write FASTA file for this job (remove stale root-owned files first)
 FASTA_PATH="/tmp/${BACKEND_ID}.fasta"
+rm -f "$FASTA_PATH" "/tmp/${BACKEND_ID}.log" 2>/dev/null || true
 echo ">A|protein" > "$FASTA_PATH"
 echo "$SEQUENCE" >> "$FASTA_PATH"
+
+# Stop model servers before TPU jobs that use a DIFFERENT framework (releases VFIO)
+# ESMFold-TPU uses its own server. Boltz2-TPU uses its own server.
+# AF2-TPU uses JAX (no server) — must kill ALL torch_xla servers first.
+if [[ "$SILICON" == "tpu" && "$BACKEND_ID" == "af2-tpu" ]]; then
+  pkill -f "server.py" 2>/dev/null || true
+  sleep 2
+  rm -f /tmp/libtpu_lockfile 2>/dev/null || true
+fi
+# Kill ESMFold server before Boltz2 (different model, same VFIO)
+if [[ "$BACKEND_ID" == "boltz2-tpu" ]]; then
+  pkill -f "esmfold.*server" 2>/dev/null || true
+  sleep 1
+  rm -f /tmp/libtpu_lockfile 2>/dev/null || true
+fi
 
 # ── Phase 1: Allocating ─────────────────────────────────────────────
 log_event "allocate" "allocating on $VM_NAME ($SILICON)"
@@ -185,4 +205,10 @@ if [[ "$SILICON" == "tpu" ]]; then
   pkill -f "python3.*predict.py" 2>/dev/null || true
   pkill -f "libtpu" 2>/dev/null || true
   rm -f /tmp/libtpu_lockfile 2>/dev/null || true
+  # Restart ESMFold server after af2-tpu (last TPU job) to keep warm for next demo
+  if [[ "$BACKEND_ID" == "af2-tpu" ]] && [[ -f /opt/backends/esmfold-tpu/server.py ]]; then
+    sleep 3
+    PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface nohup python3 /opt/backends/esmfold-tpu/server.py > /tmp/esmfold_server.log 2>&1 &
+    echo "[run_backend] restarted ESMFold server (pid $!)"
+  fi
 fi

@@ -33,7 +33,7 @@ SEQUENCES=(
 )
 SEQUENCE="${SEQUENCES[$PROTEIN_ID]:-${SEQUENCES[hemoglobin]}}"
 
-BACKENDS=("af2-tpu" "af2-gpu" "esmfold-tpu" "esmfold-gpu" "boltz2-tpu" "boltz2-gpu")
+BACKENDS=("esmfold-tpu" "boltz2-tpu" "af2-tpu" "af2-gpu" "esmfold-gpu" "boltz2-gpu")
 
 echo "=== predict.sh ==="
 echo "Protein:  $PROTEIN_ID (${#SEQUENCE} aa)"

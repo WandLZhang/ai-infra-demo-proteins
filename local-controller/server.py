@@ -64,22 +64,30 @@ def _read_job_state():
     return lanes, all_complete, all_idle
 
 
+_last_submit_time = None
+
 @app.route("/api/submit", methods=["POST"])
 def submit():
+    global _last_submit_time
     data = request.json or {}
     protein_id = data.get("protein_id", "hemoglobin")
+
+    now = datetime.now(timezone.utc)
+    if _last_submit_time and (now - _last_submit_time).total_seconds() < 10:
+        return jsonify({"already_running": True})
 
     lanes, all_complete, all_idle = _read_job_state()
 
     if not all_idle and not all_complete:
         return jsonify({"already_running": True})
 
+    _last_submit_time = now
     bucket = get_bucket()
     trigger = {
         "protein_id": protein_id,
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "submitted_at": now.isoformat(),
     }
-    trigger_name = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    trigger_name = now.strftime("%Y%m%d-%H%M%S")
     bucket.blob(f"triggers/{trigger_name}.json").upload_from_string(
         json.dumps(trigger), content_type="application/json"
     )
