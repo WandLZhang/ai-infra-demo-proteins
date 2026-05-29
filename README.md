@@ -142,8 +142,10 @@ sudo docker exec slurmd bash -c '
 
 # 6. Start combined model server + warm
 sudo docker exec -d slurmd bash -c 'cd /opt/backends && PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz python3 tpu-model-server.py > /tmp/tpu-model-server.log 2>&1'
-# Wait ~60s for load, then warm ESMFold: curl -X POST localhost:8090/predict -d '{"sequence":"MGSS...","out_path":"/tmp/w.pdb"}'
-# Then warm Boltz-2: curl -X POST localhost:8091/predict -d '{"fasta_path":"/tmp/w.fasta","out_dir":"/tmp/w"}'
+# Wait ~60s for load, then warm ALL 6 proteins (~28 min, runs in background):
+sudo docker exec -d slurmd bash -c 'bash /opt/scripts/tpu-warmup-all.sh > /tmp/tpu-warmup.log 2>&1'
+# Monitor: sudo docker exec slurmd tail -f /tmp/tpu-warmup.log
+# When "ALL PROTEINS WARMED" appears, TPU wins every model for any protein.
 
 # 7. Install health cron
 sudo gsutil cp gs://wz-nih-demo-shared/scripts/tpu-server-health.sh /opt/tpu-server-health.sh
