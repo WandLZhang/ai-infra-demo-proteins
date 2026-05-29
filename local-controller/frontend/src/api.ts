@@ -96,7 +96,8 @@ export async function pollEvents(): Promise<SlurmEvent[]> {
   )
   if (!listResp.ok) return []
   const listData = await listResp.json()
-  const items: { name: string }[] = listData.items || []
+  const allItems: { name: string }[] = listData.items || []
+  const items = allItems.filter(i => !i.name.includes('slurmctld'))
   items.sort((a, b) => a.name.localeCompare(b.name))
 
   const events: SlurmEvent[] = await Promise.all(
