@@ -205,17 +205,29 @@ export default function App() {
 
         if (events.length > lastEventCount.current) {
           const newEvents = events.slice(lastEventCount.current)
-            .filter(e => e.type !== 'node_up')
+            .filter(e => e.type !== 'node_up' && e.type !== 'slurmctld')
           if (newEvents.length > 0) {
             lineQueue.current.push(...newEvents)
           }
           lastEventCount.current = events.length
         }
 
-        if (status.all_complete && lineQueue.current.length === 0) {
+        // Update side ladder directly from GCS backend blobs (authoritative, not drip-delayed)
+        for (const [bid, blob] of Object.entries(status.lanes)) {
+          const backendId = bid as BackendId
+          if (!BACKENDS.some(b => b.id === backendId)) continue
+          const s = blob.state as LaneStatus['state']
+          if (s === 'done' || s === 'failed') {
+            setLanes(prev => {
+              if (prev[backendId]?.state === s) return prev
+              return { ...prev, [backendId]: { ...prev[backendId], state: s, elapsedMs: blob.elapsed_ms || 0, costAccumulated: blob.cost_accumulated || 0, completedAt: blob.completed_at ? new Date(blob.completed_at).getTime() : null } }
+            })
+          }
+        }
+
+        if (status.all_complete) {
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = null
-          // Only auto-advance to 'done' if user hasn't manually advanced to 'catalog'
           setPhase(p => p === 'running' || p === 'dispatching' ? 'done' : p)
         }
       } catch (err) {
