@@ -54,14 +54,20 @@ region:  us-east5                      region:  us-east5                        
 
 ## Models & Silicon
 
-| Backend | Model | Silicon | Container | Inference Time |
-|---------|-------|---------|-----------|---------------|
-| af2-tpu | AlphaFold 2 | TPU v6e | slurm-tpu | ~94s |
-| af2-gpu | AlphaFold 2 | A100 GPU | slurm-gpu | ~170s |
-| esmfold-tpu | ESMFold | TPU v6e | slurm-tpu | ~250s |
-| esmfold-gpu | ESMFold | A100 GPU | slurm-gpu | ~170s |
-| boltz2-tpu | Boltz-2 | TPU v6e | slurm-tpu | ~350s |
-| boltz2-gpu | Boltz-2 | A100 GPU | slurm-gpu | ~90s |
+| Backend | Model | Silicon | Time (warm) | Cost | TPU wins? |
+|---------|-------|---------|------------|------|:---------:|
+| af2-tpu | AlphaFold 2 | TPU v6e | **270s** | **$0.15** | **1.4x faster, 2.6x cheaper** |
+| af2-gpu | AlphaFold 2 | A100 GPU | 394s | $0.40 | |
+| esmfold-tpu | ESMFold | TPU v6e | **9s** (warm server) | **$0.01** | **4x faster** |
+| esmfold-gpu | ESMFold | A100 GPU | 38s | $0.04 | |
+| boltz2-tpu | Boltz-2 | TPU v6e | **11s** (warm server) | **$0.006** | **6x faster** |
+| boltz2-gpu | Boltz-2 | A100 GPU | 67s | $0.07 | |
+
+### TPU Model Server (warm inference)
+
+ESMFold and Boltz-2 TPU use a **persistent model server** (`backends/tpu-model-server.py`) that keeps both models loaded on TPU in a single process. First request compiles XLA ops (~70s ESMFold, ~215s Boltz-2). Subsequent requests reuse cached ops: ESMFold ~9s, Boltz-2 ~11s.
+
+The server runs perpetually between demo runs. It's killed during AF2-TPU (JAX needs exclusive VFIO), then auto-restarted by `run_backend.sh` after AF2-TPU completes. A health cron on the TPU VM checks every 5 minutes and restarts + warms if the server is down.
 
 ## Container Images
 
@@ -80,32 +86,111 @@ Two fat Docker images with all ML deps, built on top of `slurm-compute:latest`:
 ### TPU VM (us-east5-a)
 
 ```bash
-gcloud compute tpus tpu-vm ssh nihprotein-tpuv6eeast5a-0 --zone=us-east5-a --project=wz-nih-demo-burst --command='
-sudo docker update --restart=no tpu-runtime 2>/dev/null; sudo docker stop tpu-runtime 2>/dev/null
-sudo docker rm -f slurmd 2>/dev/null; sudo docker system prune -af 2>/dev/null
+# 1. Attach 200GB Hyperdisk for Docker storage (one-time)
+gcloud compute disks create tpu-docker-storage --project=wz-nih-demo-burst \
+  --zone=us-east5-a --size=200GB --type=hyperdisk-balanced
+gcloud alpha compute tpus tpu-vm attach-disk nihprotein-tpuv6eeast5a-0 \
+  --project=wz-nih-demo-burst --zone=us-east5-a \
+  --disk=tpu-docker-storage --mode=read-write
+
+# 2. SSH in and set up Docker on Hyperdisk
+gcloud alpha compute tpus tpu-vm ssh nihprotein-tpuv6eeast5a-0 \
+  --project=wz-nih-demo-burst --zone=us-east5-a --tunnel-through-iap
+# Inside the VM:
+sudo mkfs.ext4 -F /dev/nvme0n2       # Format the Hyperdisk
+sudo systemctl stop docker
+sudo mkdir -p /mnt/docker-data && sudo mount /dev/nvme0n2 /mnt/docker-data
+sudo cp -a /var/lib/docker/* /mnt/docker-data/ 2>/dev/null
+sudo umount /mnt/docker-data && sudo mv /var/lib/docker /var/lib/docker.bak
+sudo mkdir -p /var/lib/docker && sudo mount /dev/nvme0n2 /var/lib/docker
+echo '/dev/nvme0n2 /var/lib/docker ext4 defaults 0 2' | sudo tee -a /etc/fstab
+sudo systemctl start docker && sudo rm -rf /var/lib/docker.bak
+
+# 3. Create slurmd container
+sudo gsutil cp gs://wz-nih-demo-shared/config/munge.key /tmp/munge.key
+sudo chmod 400 /tmp/munge.key
 sudo docker pull us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-tpu:latest
-sudo docker run -d --name slurmd --privileged --net=host --restart=always --ulimit memlock=-1:-1 \
+sudo docker run -d --name slurmd --privileged --net=host --restart=unless-stopped \
+  --ulimit memlock=-1:-1 --hostname=nihprotein-tpuv6eeast5a-0 \
+  -v /tmp/munge.key:/etc/munge/munge.key \
+  -v /etc/slurm:/etc/slurm -v /var/spool/slurm:/var/spool/slurm \
+  --entrypoint=/usr/bin/systemd \
   us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-tpu:latest
-sleep 10
-sudo docker exec slurmd bash -c "slurmd --conf-server=172.16.0.2:6820 -N nihprotein-tpuv6eeast5a-0 &"
+
+# 4. Configure munge + symlink caches to Hyperdisk
+sudo docker exec slurmd bash -c '
+  mkdir -p /run/munge && chown munge:munge /run/munge /etc/munge/munge.key
+  /usr/sbin/munged --force && systemctl restart slurmd
+  # Symlink model caches to Docker writable layer (on Hyperdisk)
+  mkdir -p /var/lib/hf-cache /var/lib/boltz-cache
+  rm -rf /root/.cache/huggingface && ln -s /var/lib/hf-cache /root/.cache/huggingface
+  rm -rf /root/.boltz /tmp/.boltz && ln -s /var/lib/boltz-cache /root/.boltz && ln -s /var/lib/boltz-cache /tmp/.boltz
 '
+
+# 5. Cache model weights + deploy scripts
+sudo docker exec slurmd bash -c '
+  python3 -c "from transformers import AutoTokenizer, EsmForProteinFolding; AutoTokenizer.from_pretrained(\"facebook/esmfold_v1\"); EsmForProteinFolding.from_pretrained(\"facebook/esmfold_v1\")"
+  chmod -R a+rwX /root/.cache/huggingface/ && chmod a+rx /root /root/.cache
+  gsutil -q cp gs://wz-nih-demo-shared/scripts/backends/tpu-model-server.py /opt/backends/tpu-model-server.py
+  for b in af2-tpu esmfold-tpu boltz2-tpu; do
+    gsutil -q cp gs://wz-nih-demo-shared/scripts/backends/$b/predict.py /opt/backends/$b/predict.py
+  done
+  gsutil -q cp gs://wz-nih-demo-shared/scripts/backends/esmfold-tpu/server.py /opt/backends/esmfold-tpu/server.py
+  gsutil -q cp gs://wz-nih-demo-shared/scripts/backends/boltz2-tpu/server.py /opt/backends/boltz2-tpu/server.py
+'
+# Boltz weights will auto-download on first predict run
+
+# 6. Start combined model server + warm
+sudo docker exec -d slurmd bash -c 'cd /opt/backends && PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz python3 tpu-model-server.py > /tmp/tpu-model-server.log 2>&1'
+# Wait ~60s for load, then warm ESMFold: curl -X POST localhost:8090/predict -d '{"sequence":"MGSS...","out_path":"/tmp/w.pdb"}'
+# Then warm Boltz-2: curl -X POST localhost:8091/predict -d '{"fasta_path":"/tmp/w.fasta","out_dir":"/tmp/w"}'
+
+# 7. Install health cron
+sudo gsutil cp gs://wz-nih-demo-shared/scripts/tpu-server-health.sh /opt/tpu-server-health.sh
+sudo chmod +x /opt/tpu-server-health.sh
+(sudo crontab -l 2>/dev/null | grep -v tpu-server-health; echo '*/5 * * * * /opt/tpu-server-health.sh >> /tmp/tpu-health.log 2>&1') | sudo crontab -
 ```
 
-### GPU VM (us-central1-f)
+### GPU VMs (us-central1-f, us-west1-b)
+
+Repeat for both GPU VMs (`nihprotein-a100spotcentra-0` in `us-central1-f` and `nihprotein-a100west1-0` in `us-west1-b`).
+
+**Important for west1**: The VM has NVIDIA driver 570 (CUDA 12.8). The container image has `torch==2.6.0+cu124` which is compatible. If the kernel auto-upgrades, the NVIDIA driver module may break — the GRUB default is pinned to kernel `6.8.0-1047-gcp` in `/etc/default/grub.d/50-cloudimg-settings.cfg`.
 
 ```bash
-gcloud compute ssh nihprotein-a100spotcentra-0 --zone=us-central1-f --project=wz-nih-demo-burst --tunnel-through-iap --command='
-sudo docker rm -f slurmd 2>/dev/null; sudo docker system prune -af 2>/dev/null
+gcloud compute ssh <VM_NAME> --zone=<ZONE> --project=wz-nih-demo-burst --tunnel-through-iap
+
+# 1. Create container with NVIDIA lib mounts + munge key
+sudo gsutil cp gs://wz-nih-demo-shared/config/munge.key /tmp/munge.key
+sudo chmod 400 /tmp/munge.key
+NVIDIA_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
 sudo docker pull us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-gpu:latest
-NVIDIA_LIB=$(find /usr/lib -name "libnvidia-ml.so.595*" 2>/dev/null | head -1)
-CUDA_LIB=$(find /usr/lib -name "libcuda.so.595*" 2>/dev/null | head -1)
-sudo docker run -d --name slurmd --privileged --net=host --restart=always --ulimit memlock=-1:-1 \
-  ${NVIDIA_LIB:+-v $NVIDIA_LIB:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1} \
-  ${CUDA_LIB:+-v $CUDA_LIB:/usr/lib/x86_64-linux-gnu/libcuda.so.1} \
+sudo docker run -d --name slurmd --privileged --net=host --restart=unless-stopped \
+  --ulimit memlock=-1:-1 --hostname=<VM_NAME> \
+  -v /tmp/munge.key:/etc/munge/munge.key \
+  -v /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.${NVIDIA_VER}:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 \
+  -v /usr/lib/x86_64-linux-gnu/libcuda.so.${NVIDIA_VER}:/usr/lib/x86_64-linux-gnu/libcuda.so.1 \
+  -v /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.${NVIDIA_VER}:/usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1 \
+  -v /etc/slurm:/etc/slurm -v /var/spool/slurm:/var/spool/slurm \
+  --entrypoint=/usr/bin/systemd \
   us-east5-docker.pkg.dev/wz-nih-demo-burst/proteins/slurm-gpu:latest
-sleep 10; sudo docker exec slurmd ldconfig
-sudo docker exec slurmd bash -c "slurmd --conf-server=172.16.0.2:6820 -N nihprotein-a100spotcentra-0 &"
+
+# 2. Configure munge + ldconfig + cache weights
+sudo docker exec slurmd bash -c '
+  mkdir -p /run/munge && chown munge:munge /run/munge /etc/munge/munge.key
+  /usr/sbin/munged --force && systemctl restart slurmd
+  ln -sf /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so
+  echo /usr/lib/x86_64-linux-gnu > /etc/ld.so.conf.d/nvidia.conf && ldconfig
+  python3 -c "from transformers import AutoTokenizer, EsmForProteinFolding; AutoTokenizer.from_pretrained(\"facebook/esmfold_v1\"); EsmForProteinFolding.from_pretrained(\"facebook/esmfold_v1\")"
+  chmod -R a+rwX /root/.cache/huggingface/ && chmod a+rx /root /root/.cache
+  mkdir -p /tmp/.config/trifast && chmod 777 /tmp/.config /tmp/.config/trifast
 '
+
+# 3. Install health cron
+sudo gsutil cp gs://wz-nih-demo-shared/scripts/gpu-health.sh /opt/gpu-health.sh
+sudo chmod +x /opt/gpu-health.sh
+sudo docker exec slurmd bash -c 'gsutil -q cp gs://wz-nih-demo-shared/scripts/gpu-node-setup.sh /opt/scripts/gpu-node-setup.sh && chmod +x /opt/scripts/gpu-node-setup.sh'
+(sudo crontab -l 2>/dev/null | grep -v gpu-health; echo '*/10 * * * * /opt/gpu-health.sh >> /tmp/gpu-health.log 2>&1') | sudo crontab -
 ```
 
 ## Deploy
@@ -211,6 +296,40 @@ Every event drives terminal + side ladder + map markers from ONE stream:
 
 predict.sh Phase 1 submits to spot-*, waits 65s, Phase 2 resubmits failures to guaranteed.
 
+## Self-Healing & Storage
+
+### Health Crons (auto-installed on VMs)
+
+| VM | Cron | What it does |
+|----|------|-------------|
+| TPU (east5a-0) | `*/5 * * * *` | Checks `curl localhost:8090`, restarts combined model server + auto-warms both models if down. Cleans disk when >85%. |
+| GPU (west1-0, central1-f) | `*/10 * * * *` | Checks `torch.cuda.is_available()`, installs torch 2.6.0+cu124 if broken, caches HF weights, fixes ldconfig. Cleans disk when >85%. |
+
+Install scripts: `scripts/tpu-server-health.sh`, `scripts/gpu-health.sh`, `scripts/gpu-node-setup.sh`.
+
+### Storage Layout
+
+| VM | Boot Disk | Docker Storage | Model Caches |
+|----|-----------|---------------|-------------|
+| TPU | 100GB NVMe (OS only) | **200GB Hyperdisk Balanced** mounted at `/var/lib/docker` | Symlinked: `/root/.cache/huggingface` → `/var/lib/hf-cache/`, `/root/.boltz` → `/var/lib/boltz-cache/` (both on Hyperdisk via Docker writable layer) |
+| GPU central1 | 200GB PD | Same disk | HF cache at `/root/.cache/huggingface/` |
+| GPU west1 | 200GB PD | Same disk | HF cache at `/root/.cache/huggingface/` |
+
+### Systemd Services (controller VM)
+
+| Service | Restart policy | What |
+|---------|---------------|------|
+| `trigger-watcher.service` | `Restart=always` | Polls GCS for triggers, runs `predict.sh` |
+| `protein-server.service` | `Restart=always` | Flask state server on port 8080 |
+
+### Submit Resilience (3-layer guard)
+
+1. **Frontend** (`App.tsx`): Checks if any lane is actively running (queued/allocating/inferring). If yes, just polls existing run without resubmitting.
+2. **Cloud Run** (`server.py`): Reads GCS backend states. If any backend is not idle/done/failed, returns `already_running: true`.
+3. **predict.sh**: Checks `squeue`. If ANY jobs exist in queue, exits immediately.
+
+Press Enter any number of times — the system will either pick up the current run or start a new one when the previous is fully done. No manual GCS cleanup needed — `predict.sh` handles cleanup at the start of each run.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -229,10 +348,13 @@ predict.sh Phase 1 submits to spot-*, waits 65s, Phase 2 resubmits failures to g
 backends/
   af2-tpu/predict.py          # AlphaFold 2 on JAX (CPU on TPU VM)
   af2-gpu/predict.py          # AlphaFold 2 on JAX (CUDA)
-  esmfold-tpu/predict.py      # ESMFold on torch_xla (eager mode)
+  esmfold-tpu/predict.py      # ESMFold on torch_xla (tries warm server first)
+  esmfold-tpu/server.py       # ESMFold model server (standalone, port 8090)
   esmfold-gpu/predict.py      # ESMFold on CUDA
-  boltz2-tpu/predict.py       # Boltz-2 with 10 monkey-patches for XLA
-  boltz2-gpu/predict.py       # Boltz-2 stock with trifast
+  boltz2-tpu/predict.py       # Boltz-2 with 10 monkey-patches (tries warm server first)
+  boltz2-tpu/server.py        # Boltz-2 model server (standalone, port 8091)
+  boltz2-gpu/predict.py       # Boltz-2 stock with boltz CLI
+  tpu-model-server.py         # Combined ESMFold+Boltz-2 server (single process, both models on TPU)
   esmfold-tpu/bench_modes.py  # Compare torch_xla execution modes on v6e
 
 containers/
@@ -248,6 +370,9 @@ scripts/
   watch_triggers.sh           # GCS trigger → predict.sh
   env.sh                      # Project IDs, region, pricing (sourced by scripts)
   generate_af2_features.py    # ColabFold MMseqs2 helper for AF2 features.pkl
+  tpu-server-health.sh        # Cron: restart TPU model server if down + warm + disk cleanup
+  gpu-health.sh               # Cron: check CUDA + weights + disk cleanup on GPU VMs
+  gpu-node-setup.sh           # Fix torch, ldconfig, cache weights inside GPU container
 
 local-controller/
   Dockerfile                  # State server (Flask) container for Cloud Run
