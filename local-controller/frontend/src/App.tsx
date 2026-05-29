@@ -416,7 +416,7 @@ export default function App() {
             ))}
           </>
         )}
-        {phase === 'done' && <div className="terminal-line" style={{ color: '#09d3ac' }}>researcher@biowulf-bld12:~$ ▌</div>}
+        {phase === 'done' && lineQueue.current.length === 0 && <div className="terminal-line" style={{ color: '#09d3ac' }}>researcher@biowulf-bld12:~$ ▌</div>}
       </div>
 
       {/* Side ladder — always visible, fills with values as backends complete */}
