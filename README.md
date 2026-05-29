@@ -63,11 +63,22 @@ region:  us-east5                      region:  us-east5                        
 | boltz2-tpu | Boltz-2 | TPU v6e | **11s** (warm server) | **$0.006** | **6x faster** |
 | boltz2-gpu | Boltz-2 | A100 GPU | 67s | $0.07 | |
 
+### TPU Architecture (two VMs, no VFIO conflict)
+
+Two separate TPU v6e VMs eliminate the VFIO conflict between JAX (AF2) and torch_xla (ESMFold/Boltz-2):
+
+| TPU VM | Slurm Node | Role | Backends |
+|--------|-----------|------|----------|
+| east5a-0 | nihprotein-tpuv6eeast5a-0 | Model server (perpetually warm) | ESMFold-TPU, Boltz2-TPU |
+| east5b-0 | nihprotein-tpuv6eeast5a-1 | JAX inference (no server) | AF2-TPU |
+
+`predict.sh` pins jobs via `--nodelist`: AF2-TPU → east5a-1, ESMFold/Boltz2 → east5a-0. All 3 TPU jobs run in parallel.
+
 ### TPU Model Server (warm inference)
 
-ESMFold and Boltz-2 TPU use a **persistent model server** (`backends/tpu-model-server.py`) that keeps both models loaded on TPU in a single process. First request compiles XLA ops (~70s ESMFold, ~215s Boltz-2). Subsequent requests reuse cached ops: ESMFold ~9s, Boltz-2 ~11s.
+ESMFold and Boltz-2 TPU use a **persistent model server** (`backends/tpu-model-server.py`) that keeps both models loaded on TPU in a single process on east5a-0. XLA ops are pre-compiled for all 6 demo proteins via `scripts/tpu-warmup-all.sh` (~28 min one-time warmup).
 
-The server runs perpetually between demo runs. It's killed during AF2-TPU (JAX needs exclusive VFIO), then auto-restarted by `run_backend.sh` after AF2-TPU completes. A health cron on the TPU VM checks every 5 minutes and restarts + warms if the server is down.
+The server runs perpetually. A health cron on the TPU VM checks every 5 minutes and restarts + warms all 6 proteins if the server is down.
 
 ## Container Images
 
