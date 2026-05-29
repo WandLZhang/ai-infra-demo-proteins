@@ -184,13 +184,13 @@ export default function App() {
         }
       }
 
-      // Peek at next item's timestamp to calculate delay
+      // Peek at next item's timestamp to calculate delay (cap at 3s for replay)
       let delay = 600
       if (lineQueue.current.length > 0) {
         const next = lineQueue.current[0] as any
         if (ev.ts && next.ts) {
           const gap = new Date(next.ts).getTime() - new Date(ev.ts).getTime()
-          delay = Math.max(100, gap)
+          delay = Math.min(3000, Math.max(100, gap))
         }
       }
       dripRef.current = setTimeout(drainNext, delay) as any
@@ -251,17 +251,12 @@ export default function App() {
   const handleSubmit = useCallback(async () => {
     try {
       const result = await submitRun(currentProtein.id)
-      if (result.already_running) {
-        // Jobs in flight — just watch them
-        setPhase('running')
-      } else {
-        // New run — clean slate
-        setDispatchLines([])
-        setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
-        setZoneStates({})
-        setVmStates({})
-        setPhase('running')
-      }
+      // Always reset terminal + lanes for a clean replay
+      setDispatchLines([])
+      setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
+      setZoneStates({})
+      setVmStates({})
+      setPhase('running')
       startPolling()
     } catch (err) {
       console.error('Submit failed:', err)
