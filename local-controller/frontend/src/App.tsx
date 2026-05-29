@@ -228,7 +228,6 @@ export default function App() {
         if (status.all_complete) {
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = null
-          setPhase(p => p === 'running' || p === 'dispatching' ? 'done' : p)
         }
       } catch (err) {
         console.error('Poll error:', err)
