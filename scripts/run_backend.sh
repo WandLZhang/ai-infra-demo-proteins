@@ -111,18 +111,11 @@ rm -f "$FASTA_PATH" "/tmp/${BACKEND_ID}.log" 2>/dev/null || true
 echo ">A|protein" > "$FASTA_PATH"
 echo "$SEQUENCE" >> "$FASTA_PATH"
 
-# Stop model servers before TPU jobs that use a DIFFERENT framework (releases VFIO)
-# ESMFold-TPU uses its own server. Boltz2-TPU uses its own server.
-# AF2-TPU uses JAX (no server) — must kill ALL torch_xla servers first.
-if [[ "$SILICON" == "tpu" && "$BACKEND_ID" == "af2-tpu" ]]; then
+# Kill combined TPU model server before AF2-TPU (JAX needs exclusive VFIO)
+if [[ "$BACKEND_ID" == "af2-tpu" ]]; then
+  pkill -f "tpu-model-server" 2>/dev/null || true
   pkill -f "server.py" 2>/dev/null || true
   sleep 2
-  rm -f /tmp/libtpu_lockfile 2>/dev/null || true
-fi
-# Kill ESMFold server before Boltz2 (different model, same VFIO)
-if [[ "$BACKEND_ID" == "boltz2-tpu" ]]; then
-  pkill -f "esmfold.*server" 2>/dev/null || true
-  sleep 1
   rm -f /tmp/libtpu_lockfile 2>/dev/null || true
 fi
 
@@ -205,10 +198,18 @@ if [[ "$SILICON" == "tpu" ]]; then
   pkill -f "python3.*predict.py" 2>/dev/null || true
   pkill -f "libtpu" 2>/dev/null || true
   rm -f /tmp/libtpu_lockfile 2>/dev/null || true
-  # Restart ESMFold server after af2-tpu (last TPU job) to keep warm for next demo
-  if [[ "$BACKEND_ID" == "af2-tpu" ]] && [[ -f /opt/backends/esmfold-tpu/server.py ]]; then
+  # Restart combined TPU model server after AF2-TPU (JAX done, VFIO free)
+  # Server hosts both ESMFold + Boltz-2 in one process for subsequent TPU jobs
+  if [[ "$BACKEND_ID" == "af2-tpu" ]] && [[ -f /opt/backends/tpu-model-server.py ]]; then
     sleep 3
-    PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface nohup python3 /opt/backends/esmfold-tpu/server.py > /tmp/esmfold_server.log 2>&1 &
-    echo "[run_backend] restarted ESMFold server (pid $!)"
+    cd /opt/backends && PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz \
+      nohup python3 /opt/backends/tpu-model-server.py > /tmp/tpu-model-server.log 2>&1 &
+    echo "[run_backend] restarted combined TPU model server (pid $!)"
+    # Wait for server to load models (~45s) before ESMFold-TPU job starts
+    for i in $(seq 1 60); do
+      curl -sf http://localhost:8090/healthz > /dev/null 2>&1 && break
+      sleep 1
+    done
+    echo "[run_backend] TPU model server ready"
   fi
 fi
