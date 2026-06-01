@@ -290,7 +290,15 @@ Builds `local-controller/server.py` (Flask GCS proxy) and deploys to Cloud Run. 
 bash scripts/deploy_controller.sh
 ```
 
-Uploads `predict.sh`, `run_backend.sh`, `watch_triggers.sh`, `poll_squeue.sh`, `env.sh` to `/opt/protein-demo/` on `biowulf-controller` in `wz-nih-demo-controller`. Installs Python deps. Grants cross-project IAM. (Re)installs `trigger-watcher.service` as a systemd unit.
+Uploads `predict.sh`, `run_backend.sh`, `watch_triggers.sh`, `poll_squeue.sh`, `env.sh` to `/opt/protein-demo/` on `biowulf-controller` in `wz-nih-demo-controller`. SCP lands in `/tmp/` first and `sudo mv` relocates — direct overwrite fails because prior deploys leave files root-owned. Installs Python deps. Grants cross-project IAM. (Re)installs `trigger-watcher.service` as a systemd unit.
+
+### TPU VM host scripts → `/opt/` on east5a-0
+
+```bash
+bash scripts/deploy_tpu_host_scripts.sh
+```
+
+Pushes `tpu-server-health.sh` and `tpu-keep-warm.sh` to `/opt/` on `nihprotein-tpuv6eeast5a-0` (the ESMFold TPU VM that owns the frontend badge). Uploads `prewarm_all_proteins.sh` to `gs://wz-nih-demo-shared/scripts/` (cron jobs fetch it at runtime into the slurmd container). After deploy, triggers `tpu-server-health.sh` once so the badge updates immediately rather than waiting for the next 5-min cron tick.
 
 ### Containers → Artifact Registry
 
@@ -471,6 +479,7 @@ scripts/
   deploy_frontend.sh             # Build Vite + push to Cloud Run
   deploy_server.sh               # Build Flask state server + push to Cloud Run
   deploy_controller.sh           # Upload scripts + (re)install systemd on controller VM
+  deploy_tpu_host_scripts.sh     # Push /opt/tpu-server-health.sh + /opt/tpu-keep-warm.sh to east5a-0; trigger health-check
   predict.sh                     # 2-phase Spot→guaranteed sbatch dispatcher
   run_backend.sh                 # Per-backend job runner (state events, predict.py invocation)
   poll_squeue.sh                 # slurmctld event scraper
