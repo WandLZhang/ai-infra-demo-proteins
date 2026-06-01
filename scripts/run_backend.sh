@@ -121,7 +121,29 @@ update_state "allocating"
 # ── Phase 2: Loading model ───────────────────────────────────────────
 log_event "loading" "loading model weights"
 update_state "loading"
-sleep 1
+
+# ESMFold/Boltz2-TPU depend on a warm model server — wait up to 120s for it.
+# ESMFold server runs on this VM (localhost:8090).
+# Boltz-2 server runs on the dedicated east5a-3 v6e at $BOLTZ_HOST:$BOLTZ_PORT.
+if [[ "$SILICON" == "tpu" && "$BACKEND_ID" != "af2-tpu" ]]; then
+  SERVER_HOST="localhost"
+  SERVER_PORT=8090
+  if [[ "$MODEL" == "boltz2" ]]; then
+    SERVER_HOST="${BOLTZ_HOST:-10.202.0.23}"
+    SERVER_PORT="${BOLTZ_PORT:-8091}"
+  fi
+  HEALTH_URL="http://${SERVER_HOST}:${SERVER_PORT}/"
+  for i in $(seq 1 120); do
+    curl -sf -m 3 "$HEALTH_URL" > /dev/null 2>&1 && break
+    sleep 1
+  done
+  if ! curl -sf -m 3 "$HEALTH_URL" > /dev/null 2>&1; then
+    log_event "error" "model server not ready after 120s at $HEALTH_URL"
+    update_state "failed" "model server not ready at $HEALTH_URL"
+    exit 1
+  fi
+  echo "[${BACKEND_ID}] model server ready at $HEALTH_URL"
+fi
 
 # ── Phase 3: Inferring ───────────────────────────────────────────────
 log_event "inferring" "inferring $PROTEIN_ID (${#SEQUENCE}aa)" "\"protein_id\":\"$PROTEIN_ID\",\"seq_len\":${#SEQUENCE}"
@@ -131,16 +153,26 @@ update_state "inferring"
 RESULT_DIR="/tmp/result-${BACKEND_ID}"
 rm -rf "$RESULT_DIR" 2>/dev/null || true
 mkdir -p "$RESULT_DIR"
+# Warm model servers run as slurmuser (uid 1015145168) and need to write
+# the PDB/CIF into this dir on behalf of root-launched predict.py jobs.
+chmod 777 "$RESULT_DIR"
 
-# predict.py baked into the container at /opt/backends/$BACKEND_ID/predict.py
-# Fallback: downloaded from GCS to /tmp/protein-demo/backends/$BACKEND_ID/predict.py
-PREDICT_SCRIPT="/opt/backends/$BACKEND_ID/predict.py"
+# Tell the keep-warm cron that the TPU is in use, so it doesn't compete.
+# Cleared in the Phase 4 cleanup below.
+if [[ "$SILICON" == "tpu" ]]; then
+  touch /tmp/tpu-busy 2>/dev/null || true
+fi
+
+# Prefer GCS-fetched override (lets us hot-patch without rebuilding the container).
+# Falls back to baked-in /opt/backends/ copy, then the repo-relative path.
+PREDICT_SCRIPT="/tmp/protein-demo/backends/$BACKEND_ID/predict.py"
+if [[ ! -s "$PREDICT_SCRIPT" ]]; then
+  PREDICT_SCRIPT="/opt/backends/$BACKEND_ID/predict.py"
+fi
 if [[ ! -f "$PREDICT_SCRIPT" ]]; then
   PREDICT_SCRIPT="$SCRIPT_DIR/../backends/$BACKEND_ID/predict.py"
 fi
-if [[ ! -f "$PREDICT_SCRIPT" ]]; then
-  PREDICT_SCRIPT="/tmp/protein-demo/backends/$BACKEND_ID/predict.py"
-fi
+echo "[${BACKEND_ID}] using predict.py: $PREDICT_SCRIPT"
 
 if [[ -f "$PREDICT_SCRIPT" ]]; then
   set +e
@@ -148,8 +180,31 @@ if [[ -f "$PREDICT_SCRIPT" ]]; then
   if [[ "$MODEL" == "af2" ]]; then
     EXTRA_ARGS="--protein-id $PROTEIN_ID"
   fi
-  if [[ "$SILICON" == "tpu" ]]; then
-    PJRT_DEVICE=TPU python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" $EXTRA_ARGS 2>&1 | tee "/tmp/${BACKEND_ID}.log"
+  # AF2-TPU uses isolated JAX venv (avoids torch_xla libtpu conflict)
+  # Must kill model server first to release VFIO, restart after
+  if [[ "$BACKEND_ID" == "af2-tpu" ]]; then
+    log_event "vfio_release" "killing model server for JAX VFIO access"
+    echo '{"status":"loading"}' | gsutil -q cp - gs://wz-nih-demo-shared/tpu-status.json 2>/dev/null || true
+    # Kill all variants of the warm ESMFold server. The pidfile may be empty
+    # (docker exec -d's $! doesn't propagate), so don't rely on it alone.
+    kill -9 $(cat /tmp/tpu-model-server.pid 2>/dev/null) 2>/dev/null || true
+    sleep 1
+    pkill -9 -f "tpu-esmfold-server" 2>/dev/null || true
+    pkill -9 -f "tpu-model-server" 2>/dev/null || true
+    pkill -9 -f "tpu-boltz2-server" 2>/dev/null || true
+    pkill -9 -f "libtpu" 2>/dev/null || true
+    rm -f /tmp/libtpu_lockfile 2>/dev/null
+    sleep 8
+    PYTHON_BIN="/tmp/jax-venv/bin/python3"
+    if [[ ! -f "$PYTHON_BIN" ]]; then PYTHON_BIN="python3"; fi
+    $PYTHON_BIN "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" $EXTRA_ARGS 2>&1 | tee "/tmp/${BACKEND_ID}.log"
+    EXIT_CODE=$?
+  elif [[ "$SILICON" == "tpu" ]]; then
+    # Boltz-2 client talks to the warm server on east5a-3; ESMFold client talks to localhost
+    export BOLTZ_HOST="${BOLTZ_HOST:-10.202.0.23}"
+    export BOLTZ_PORT="${BOLTZ_PORT:-8091}"
+    PJRT_DEVICE=TPU BOLTZ_HOST="$BOLTZ_HOST" BOLTZ_PORT="$BOLTZ_PORT" \
+      python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" $EXTRA_ARGS 2>&1 | tee "/tmp/${BACKEND_ID}.log"
     EXIT_CODE=$?
   else
     python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" $EXTRA_ARGS 2>&1 | tee "/tmp/${BACKEND_ID}.log"
@@ -191,8 +246,20 @@ log_event "done" "done — ${ELAPSED_MS}ms \$$COST" "\"elapsed_ms\":$ELAPSED_MS,
 # Release TPU VFIO handles and lockfile so the next job can access the device
 if [[ "$SILICON" == "tpu" ]]; then
   pkill -f "python3.*predict.py" 2>/dev/null || true
-  pkill -f "libtpu" 2>/dev/null || true
-  rm -f /tmp/libtpu_lockfile 2>/dev/null || true
-  # Model server stays on east5a perpetually. AF2-TPU runs on east5b (separate VFIO).
-  # Health cron handles server restarts + warmup.
+  rm -f /tmp/libtpu_lockfile /tmp/tpu-busy 2>/dev/null || true
+  # After AF2-TPU, restart ESMFold server (kill released VFIO; new server takes it)
+  # Start as slurmuser, eager mode (no 30 min cold compile).
+  # Also kick off all-6-protein prewarm so badge auto-flips back to "ready".
+  if [[ "$BACKEND_ID" == "af2-tpu" ]]; then
+    log_event "server_restart" "restarting ESMFold server + prewarming all 6 proteins"
+    echo '{"status":"loading"}' | gsutil -q cp - gs://wz-nih-demo-shared/tpu-status.json 2>/dev/null || true
+    rm -f /tmp/libtpu_lockfile /tmp/tpu-model-server.pid /tmp/tpu-prewarm-done 2>/dev/null
+    sleep 2
+    setsid runuser -u slurmuser -- bash -c 'cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz NUMBA_CACHE_DIR=/tmp/numba_cache python3 -u tpu-esmfold-server.py > /tmp/tpu-model-server.log 2>&1 & echo $! > /tmp/tpu-model-server.pid' &
+    disown
+    # Fire prewarm-all once server is up; it writes status=ready at end
+    setsid bash -c 'for i in $(seq 1 120); do curl -sf -m 3 http://localhost:8090/ > /dev/null 2>&1 && break; sleep 1; done; gsutil -q cp gs://wz-nih-demo-shared/scripts/prewarm_all_proteins.sh /tmp/prewarm_all_proteins.sh && bash /tmp/prewarm_all_proteins.sh > /tmp/tpu-prewarm.log 2>&1' &
+    disown
+    echo "[af2-tpu] ESMFold restart + prewarm started in background"
+  fi
 fi

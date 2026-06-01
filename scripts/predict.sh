@@ -33,7 +33,7 @@ SEQUENCES=(
 )
 SEQUENCE="${SEQUENCES[$PROTEIN_ID]:-${SEQUENCES[hemoglobin]}}"
 
-BACKENDS=("af2-tpu" "esmfold-tpu" "boltz2-tpu" "af2-gpu" "esmfold-gpu" "boltz2-gpu")
+BACKENDS=("esmfold-tpu" "boltz2-tpu" "af2-tpu" "af2-gpu" "esmfold-gpu" "boltz2-gpu")
 
 echo "=== predict.sh ==="
 echo "Protein:  $PROTEIN_ID (${#SEQUENCE} aa)"
@@ -54,7 +54,7 @@ cat <<EOF | gsutil -q cp - "$JOB_DIR/manifest.json"
 {
   "protein_id": "$PROTEIN_ID",
   "sequence_length": ${#SEQUENCE},
-  "backends": ["${BACKENDS[0]}","${BACKENDS[1]}","${BACKENDS[2]}","${BACKENDS[3]}","${BACKENDS[4]}","${BACKENDS[5]}"],
+  "backends": ["af2-tpu","esmfold-tpu","boltz2-tpu","af2-gpu","esmfold-gpu","boltz2-gpu"],
   "submitted_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "status": "running"
 }
@@ -80,7 +80,7 @@ wait
 
 build_wrap() {
   local BACKEND="$1"
-  echo "export HOME=/tmp; ulimit -l unlimited 2>/dev/null; mkdir -p /tmp/tpu_logs 2>/dev/null; chmod 777 /tmp/tpu_logs 2>/dev/null; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo; gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
+  echo "export HOME=/tmp NUMBA_CACHE_DIR=/tmp/numba_cache; mkdir -p /tmp/numba_cache 2>/dev/null; ulimit -l unlimited 2>/dev/null; chmod 777 /tmp/tpu_logs /tmp/*.log /tmp/*.fasta 2>/dev/null; chmod -R 777 /tmp/.gsutil /tmp/.config /tmp/protein-demo /tmp/result-* /tmp/numba_cache /tmp/af2-features /var/cache/alphafold-params 2>/dev/null; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo/backends/$BACKEND; gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; gsutil -q cp gs://wz-nih-demo-shared/backends/$BACKEND/predict.py /tmp/protein-demo/backends/$BACKEND/predict.py 2>/dev/null || true; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
 }
 
 # ── Phase 1: Submit all to Spot partitions ──
@@ -113,6 +113,10 @@ sleep "$SPOT_WAIT"
 
 # ── Phase 2: Check results, resubmit failures to guaranteed ──
 echo "Phase 2: checking Spot results..."
+
+# Serialize ALL TPU jobs: ESMFold → Boltz2 → AF2 (single TPU, one at a time)
+PREV_TPU_JOB=""
+
 for BACKEND in "${BACKENDS[@]}"; do
   JOB_ID="${SPOT_JOBS[$BACKEND]}"
   JOB_STATE=$(scontrol show job "$JOB_ID" 2>/dev/null | grep -oP 'JobState=\K\S+')
@@ -130,22 +134,28 @@ for BACKEND in "${BACKENDS[@]}"; do
   if [[ "$SILICON" == "tpu" ]]; then PARTITION="tpu"; else PARTITION="gpu"; fi
 
   JOB_CMD=$(build_wrap "$BACKEND")
-  # Pin AF2-TPU to east5a-1 (dedicated JAX TPU, no model server conflict)
-  # ESMFold/Boltz2-TPU go to east5a-0 (model server node)
   NODE_FLAG=""
-  if [[ "$BACKEND" == "af2-tpu" ]]; then
-    NODE_FLAG="--nodelist=nihprotein-tpuv6eeast5a-1"
-  elif [[ "$SILICON" == "tpu" ]]; then
+  EXTRA_FLAGS=""
+  if [[ "$SILICON" == "tpu" ]]; then
     NODE_FLAG="--nodelist=nihprotein-tpuv6eeast5a-0"
+    EXTRA_FLAGS="--exclusive"
+    if [[ -n "$PREV_TPU_JOB" ]]; then
+      EXTRA_FLAGS="--exclusive --dependency=afterany:$PREV_TPU_JOB"
+      echo "  $BACKEND: chained after job $PREV_TPU_JOB"
+    fi
   fi
   NEW_JOB_ID=$(sbatch --parsable \
     --partition="$PARTITION" \
     $NODE_FLAG \
+    $EXTRA_FLAGS \
     --job-name="${BACKEND}" \
     --output="/dev/null" \
     --error="/dev/null" \
     --wrap="$JOB_CMD" 2>&1)
-  echo "  $BACKEND → $PARTITION (job $NEW_JOB_ID)${NODE_FLAG:+ [$NODE_FLAG]}"
+  if [[ "$SILICON" == "tpu" ]]; then
+    PREV_TPU_JOB="$NEW_JOB_ID"
+  fi
+  echo "  $BACKEND → $PARTITION (job $NEW_JOB_ID)${NODE_FLAG:+ [$NODE_FLAG]}${EXTRA_FLAGS:+ [$EXTRA_FLAGS]}"
 
   TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   SEQ="$(date +%s%N)"

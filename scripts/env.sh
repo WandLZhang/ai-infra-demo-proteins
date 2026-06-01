@@ -32,6 +32,11 @@ export BURST_GPU_REGION="us-central1"
 # Shared GCS bucket for model weights, MSAs, results (in burst project)
 export SHARED_BUCKET="gs://wz-nih-demo-shared"
 
+# Boltz-2 warm server lives on east5a-3 (dedicated v6e for full HBM headroom).
+# ESMFold warm server lives on east5a-0 (same VM that runs Slurm jobs → localhost).
+export BOLTZ_HOST="10.202.0.23"
+export BOLTZ_PORT="8091"
+
 # Artifact Registry — backend containers
 export AR_REPO="proteins"
 export AR_REGION="us-east5"

@@ -7,7 +7,7 @@ import SideLadder from './components/SideLadder'
 import InfoButton from './components/InfoButton'
 import type { Protein, ModelId, BackendId, LaneStatus, PredictResponse } from './types'
 import { BACKENDS } from './backends'
-import { submitRun, pollStatus, pollEvents } from './api'
+import { submitRun, pollStatus, pollEvents, pollTpuStatus, type TpuStatus } from './api'
 
 const PROTEINS: Protein[] = [
   { id: 'brca1', name: 'BRCA1 BRCT', sequence: 'NAMEESVSREKPELTASTERVNKRMS...', uniprotId: 'P38398', description: 'Breast cancer tumor suppressor — DNA repair', residueCount: 214 },
@@ -41,6 +41,7 @@ export default function App() {
   const dripRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [zoneStates, setZoneStates] = useState<Record<string, MarkerState>>({})
   const [vmStates, setVmStates] = useState<Record<string, { name: string, zone: string, state: string, href: string }>>({})
+  const [tpuStatus, setTpuStatus] = useState<TpuStatus | null>(null)
 
   const isMd = phase === 'md1' || phase === 'md2' || phase === 'md3'
   const isPd1 = phase === 'pd1'  // pd1 stays zoomed on us-central1 with Hyperdisk hub
@@ -236,7 +237,13 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const tpuPoll = setInterval(async () => {
+      const s = await pollTpuStatus()
+      if (s) setTpuStatus(s)
+    }, 10000)
+    pollTpuStatus().then(s => { if (s) setTpuStatus(s) })
     return () => {
+      clearInterval(tpuPoll)
       if (pollRef.current) clearInterval(pollRef.current)
       if (dripRef.current) clearTimeout(dripRef.current)
     }
@@ -322,6 +329,25 @@ export default function App() {
     <div style={{ width: '100vw', height: '100vh', background: '#171717', overflow: 'hidden', position: 'relative' }}>
       {/* Fullscreen map — zoom driven by phase */}
       <InfraMap lanes={lanes} zoneStates={zoneStates} vmStates={vmStates} onZoneClick={setSelectedZone} center={mapCenter} zoom={mapZoom} highlightUS={phase === 'catalog' || phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4' || phase === 'img'} showSpokes={phase === 'catalog2' || phase === 'catalog3' || phase === 'catalog4'} showHalos={phase === 'catalog3' || phase === 'catalog4'} mdLayer={mdLayer} showHyperdiskHub={showHyperdiskHub} showPartitionChips={showPartitionChips} showSliceViz={showSliceViz} />
+
+      {/* Top-right: TPU status badge */}
+      <div style={{
+        position: 'fixed', bottom: 15, right: 15, zIndex: 25,
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'rgba(20,20,30,0.7)', backdropFilter: 'blur(8px)',
+        border: `1px solid ${tpuStatus?.status === 'ready' ? 'rgba(9,211,172,0.3)' : 'rgba(255,165,0,0.3)'}`,
+        borderRadius: 4, padding: '5px 10px',
+        fontFamily: "'Google Sans', sans-serif", fontSize: 11, color: '#aaa',
+      }}>
+        <div style={{
+          width: 7, height: 7, borderRadius: '50%',
+          background: tpuStatus?.status === 'ready' ? '#09d3ac' : tpuStatus?.status === 'loading' ? '#ffa500' : '#ff4444',
+          boxShadow: tpuStatus?.status === 'ready' ? '0 0 6px #09d3ac' : 'none',
+        }} />
+        <span style={{ color: tpuStatus?.status === 'ready' ? '#09d3ac' : tpuStatus?.status === 'loading' ? '#ffa500' : '#ff4444' }}>
+          TPU XLA {tpuStatus?.status === 'ready' ? 'Ready' : tpuStatus?.status === 'loading' ? 'Loading' : 'Offline'}
+        </span>
+      </div>
 
       {/* Top-left: Hamburger menu */}
       <div style={{ position: 'fixed', top: 15, left: 15, zIndex: 25 }}>
@@ -510,12 +536,6 @@ export default function App() {
       />
       </div>
 
-      {/* Live indicator */}
-      {isRunning && (
-        <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 25, fontFamily: 'Courier New, monospace', fontSize: 10, color: '#eab308' }}>
-          ● LIVE — dispatching to {BACKENDS.length} backends
-        </div>
-      )}
     </div>
   )
 }
