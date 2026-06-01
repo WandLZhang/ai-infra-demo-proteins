@@ -40,8 +40,15 @@ echo "Protein:  $PROTEIN_ID (${#SEQUENCE} aa)"
 echo "Backends: ${BACKENDS[*]}"
 echo ""
 
-# Clear previous run
-gsutil -q -m rm -r "$JOB_DIR" 2>/dev/null || true
+# Clear previous run's state blobs + log stream. Deliberately DO NOT touch
+# the .pdb/.cif structure files — the frontend's ProteinViewer polls
+# job/af2-tpu.pdb on a 30s loop and a hard wipe makes the viewer 404 until
+# the new AF2 run finishes ~5 min later. The structure files naturally
+# overwrite when each backend completes. If a backend fails this run, the
+# previous run's structure stays — which matches the viewer's intent
+# ("either the last run's output or the one just produced").
+gsutil -q -m rm "$JOB_DIR/*.json" 2>/dev/null || true
+gsutil -q -m rm -r "$JOB_DIR/log" 2>/dev/null || true
 
 # Reset Spot nodes
 if command -v scontrol &>/dev/null; then
