@@ -466,6 +466,16 @@
   transform: skewX(-15deg) translateX(-8px);
   background: rgba(255,255,255,0.06);
 }
+/* TPU pulse — applied on tpu2 slide to the three TPU ladder entries.
+   Animates box-shadow only so it doesn't fight the inline borderLeftColor
+   (set per-lane based on state) or the skewX transform on the wrap. */
+@keyframes sideLadderTpuPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(9, 211, 172, 0.35); }
+  50%      { box-shadow: 0 0 18px rgba(9, 211, 172, 0.9), 0 0 32px rgba(9, 211, 172, 0.35); }
+}
+.sideLadderItem-tpu-pulse {
+  animation: sideLadderTpuPulse 2.2s ease-in-out infinite;
+}
 .sideLadderName {
   display: block;
   transform: skewX(15deg);

@@ -5,6 +5,9 @@ import { BACKENDS } from '../backends'
 interface SideLadderProps {
   lanes: Record<BackendId, LaneStatus>
   onSelect: (id: BackendId) => void
+  /** Backends to apply a cyan pulse halo to (e.g. all TPU on tpu2, or
+   *  esmfold-tpu + esmfold-gpu on tpu3 for the TorchTPU diff slide). */
+  highlightBackends?: BackendId[]
 }
 
 function stateLabel(state: string): string {
@@ -21,7 +24,8 @@ function stateLabel(state: string): string {
   }
 }
 
-export default function SideLadder({ lanes, onSelect }: SideLadderProps) {
+export default function SideLadder({ lanes, onSelect, highlightBackends }: SideLadderProps) {
+  const highlightSet = new Set(highlightBackends ?? [])
   const pairId = (id: string) => {
     const [model, silicon] = [id.replace(/-tpu$|-gpu$/, ''), id.endsWith('-tpu') ? 'tpu' : 'gpu']
     return `${model}-${silicon === 'tpu' ? 'gpu' : 'tpu'}` as BackendId
@@ -56,10 +60,11 @@ export default function SideLadder({ lanes, onSelect }: SideLadderProps) {
           else if (ratio !== null) subtitle += ` · ${ratio.toFixed(1)}×`
         }
 
+        const pulse = highlightSet.has(b.id)
         return (
           <div
             key={b.id}
-            className="sideLadderItem"
+            className={`sideLadderItem${pulse ? ' sideLadderItem-tpu-pulse' : ''}`}
             style={{ borderLeftColor: borderColor }}
             onClick={() => onSelect(b.id)}
             title={`Slide ${b.talkTrackSlide}: ${b.talkTrackLabel}`}

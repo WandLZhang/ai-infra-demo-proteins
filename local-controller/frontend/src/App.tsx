@@ -19,7 +19,7 @@ const PROTEINS: Protein[] = [
 ]
 
 // UX phases: zoomed on Building 12 → terminal → submit → zoom out → catalog → catalog2 → results
-type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'pd1' | 'pd2' | 'img' | 'gen' | 'tpu1' | 'tpu2' | 'done'
+type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'pd1' | 'pd2' | 'img' | 'gen' | 'tpu1' | 'tpu2' | 'tpu3' | 'done'
 
 function initLaneStatus(backendId: BackendId): LaneStatus {
   const b = BACKENDS.find(b => b.id === backendId)!
@@ -45,7 +45,11 @@ export default function App() {
 
   const isMd = phase === 'md1' || phase === 'md2' || phase === 'md3'
   const isPd1 = phase === 'pd1'  // pd1 stays zoomed on us-central1 with Hyperdisk hub
-  const isTpu = phase === 'tpu1' || phase === 'tpu2'
+  const isTpu = phase === 'tpu1' || phase === 'tpu2' || phase === 'tpu3'
+  const sideLadderHighlight: BackendId[] =
+    phase === 'tpu2' ? ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] :
+    phase === 'tpu3' ? ['esmfold-tpu', 'esmfold-gpu'] :
+    []
   const mapCenter = phase === 'home'
     ? { lat: 38.974, lng: -77.006 }
     : isMd || isPd1
@@ -297,11 +301,13 @@ export default function App() {
         else if (phase === 'img') setPhase('gen')
         else if (phase === 'gen') setPhase('tpu1')
         else if (phase === 'tpu1') setPhase('tpu2')
-        // 'tpu2' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
+        else if (phase === 'tpu2') setPhase('tpu3')
+        // 'tpu3' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
         // 'done' stays
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        if (phase === 'done') setPhase('tpu2')
+        if (phase === 'done') setPhase('tpu3')
+        else if (phase === 'tpu3') setPhase('tpu2')
         else if (phase === 'tpu2') setPhase('tpu1')
         else if (phase === 'tpu1') setPhase('gen')
         else if (phase === 'gen') setPhase('img')
@@ -440,7 +446,7 @@ export default function App() {
       </div>
 
       {/* Side ladder — always visible, fills with values as backends complete */}
-      <SideLadder lanes={lanes} onSelect={() => {}} />
+      <SideLadder lanes={lanes} onSelect={() => {}} highlightBackends={sideLadderHighlight} />
 
       {/* Location paper — key only changes on home↔cloud transitions, so the protein "comes in"
           on slide 1 → slide 2 and stays put through subsequent slide navigation */}
@@ -480,6 +486,7 @@ export default function App() {
           phase === 'gen' ? 'Genomics & Sequence Analysis' :
           phase === 'tpu1' ? 'TPUs' :
           phase === 'tpu2' ? 'Why TPU Economics Are Structural' :
+          phase === 'tpu3' ? 'TorchTPU: ESMFold in 3 Lines' :
           'Results'
         }
         sections={
@@ -528,6 +535,9 @@ export default function App() {
           ] :
           phase === 'tpu2' ? [
             { body: 'TPU TCO per hour is <b>30% lower than NVIDIA GB200 and 41% lower than GB300</b>, per <a href="https://newsletter.semianalysis.com/p/tpuv7-google-takes-a-swing-at-the" target="_blank">SemiAnalysis</a>. Realized model FLOPS utilization is <b>40% on TPU versus 30% on GPU — 52% lower cost per effective petaFLOP</b>. Google controls silicon, packaging, interconnect, and system design end-to-end, which captures margin at every layer.\n\nIn November 2025, Anthropic released <a href="https://www.anthropic.com/news/claude-opus-4-5" target="_blank">Claude Opus 4.5 with a 67% price cut</a> — input tokens from $15/M down to $5/M, output from $75/M to $25/M. The price reduction is a direct consequence of running on TPU.\n\nNVIDIA recently <a href="https://www.cnbc.com/2025/12/24/nvidia-groq-deal.html" target="_blank">paid approximately $20 billion for Groq\'s LPU</a>. Groq uses a systolic array architecture <b>functionally similar to what Google pioneered with TPU in 2015</b>.' },
+          ] :
+          phase === 'tpu3' ? [
+            { body: 'Most of Biowulf\'s researchers write PyTorch. Historically TPU required JAX. <a href="https://developers.googleblog.com/torchtpu-running-pytorch-natively-on-tpus-at-google-scale/" target="_blank">TorchTPU</a> eliminates that requirement by running PyTorch natively on TPU.\n\nESMFold demonstrates the minimal case. The diff between the <a href="https://github.com/WandLZhang/ai-infra-demo-proteins/blob/main/backends/esmfold-gpu/predict.py" target="_blank">GPU backend</a> and the <a href="https://github.com/WandLZhang/ai-infra-demo-proteins/blob/main/backends/esmfold-tpu/predict.py" target="_blank">TPU backend</a> on the inference path is <b>three lines</b>:<pre style="background: #0a0a0a; border: 1px solid #2a2a2a; padding: 12px; margin: 10px 0; overflow-x: auto; font-size: 11px; line-height: 1.45;"><code>import torch\n<span style="color: #09d3ac;">import torch_xla                              # NEW</span>\n<span style="color: #09d3ac;">torch_xla.experimental.eager_mode(True)       # NEW</span>\n<span style="color: #09d3ac;">import torch_xla.core.xla_model as xm         # NEW</span>\n\n<span style="color: #eab308;">device = xm.xla_device()                      # CHANGED (was "cuda")</span>\nmodel = EsmForProteinFolding.from_pretrained(_MODEL_ID).to(device)\nwith torch.no_grad():\n    output = model(**inputs)\n<span style="color: #09d3ac;">xm.mark_step()                                # NEW</span></code></pre>Three changes total: import <code>torch_xla</code> + flip to eager mode, swap the device source, add <code>xm.mark_step()</code> after the forward pass. Same HuggingFace <code>EsmForProteinFolding</code> model class, same <code>.to(device)</code> pattern, same <code>torch.no_grad()</code> block.\n\nTorchTPU is first-class in <a href="https://discuss.google.dev/t/google-cloud-tpus-are-now-a-first-class-accelerator-in-ray/345281" target="_blank">Ray 2.55</a> — the first hardware accelerator to earn that status since NVIDIA GPUs. ESMFold, Boltz-2, RFdiffusion, BindCraft, ModelAngelo, and most of the protein-design stack are PyTorch — all eligible for TPU economics without a JAX rewrite.' },
           ] :
           [
             { body: 'Inference complete — results content TBD.' },
