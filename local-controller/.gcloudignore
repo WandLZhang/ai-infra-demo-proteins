@@ -1,0 +1,11 @@
+.gcloudignore
+.git
+.gitignore
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+frontend/
+terraform/
+slurm/

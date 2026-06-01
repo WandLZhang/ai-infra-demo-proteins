@@ -343,6 +343,54 @@ Install scripts: `scripts/tpu-server-health.sh`, `scripts/gpu-health.sh`, `scrip
 
 Press Enter any number of times — the system will either pick up the current run or start a new one when the previous is fully done. No manual GCS cleanup needed — `predict.sh` handles cleanup at the start of each run.
 
+## Pre-Run Checklist
+
+Run every item before presenting. Do not skip any.
+
+```bash
+# 1. Exactly one trigger watcher
+gcloud compute ssh biowulf-controller --zone=us-east5-a --project=wz-nih-demo-controller \
+  --command="pgrep -f watch_triggers | wc -l"          # expect: 1-3 (same parent)
+
+# 2. Queue empty
+gcloud compute ssh biowulf-controller --zone=us-east5-a --project=wz-nih-demo-controller \
+  --command="squeue --noheader | wc -l"                 # expect: 0
+
+# 3. Model server is slurmuser, both ports healthy, POST works
+gcloud compute tpus tpu-vm ssh nihprotein-tpuv6eeast5a-0 --zone=us-east5-a --project=wz-nih-demo-burst \
+  --worker=all --command='sudo docker exec slurmd bash -c "
+    ps aux | grep tpu-model-server | grep -v grep | grep -v bash
+    curl -s http://localhost:8090/health; echo
+    curl -s http://localhost:8091/health; echo
+    curl -s -m 60 -X POST http://localhost:8090/predict \
+      -H \"Content-Type: application/json\" \
+      -d \"{\\\"sequence\\\":\\\"MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH\\\",\\\"out_path\\\":\\\"/tmp/precheck.pdb\\\"}\" | head -c 100
+    echo"'
+# expect: slurmus+ owner, both ready, POST returns JSON with solve_time_ms
+
+# 4. Disk OK
+gcloud compute tpus tpu-vm ssh nihprotein-tpuv6eeast5a-0 --zone=us-east5-a --project=wz-nih-demo-burst \
+  --worker=all --command='df -h / /var/lib/docker | tail -2'   # expect: both < 80%
+
+# 5. GCS badge + warmup
+gsutil cat gs://wz-nih-demo-shared/tpu-status.json    # expect: {"status":"ready"}
+# If "loading" or "offline": run warmup manually inside the container:
+# docker exec slurmd bash /opt/scripts/tpu-warmup-all.sh
+# Takes ~4 min (hemoglobin on ESMFold + Boltz-2)
+
+# 6. Simulate frontend Enter (THE REAL TEST)
+echo '{"protein_id":"hemoglobin"}' | gsutil cp - gs://wz-nih-demo-shared/triggers/precheck-$(date +%s).json
+# Wait 5 min, then:
+for b in af2-tpu esmfold-tpu boltz2-tpu af2-gpu esmfold-gpu boltz2-gpu; do
+  gsutil cat gs://wz-nih-demo-shared/job/$b.json 2>/dev/null | python3 -c \
+    "import sys,json; d=json.load(sys.stdin); print(f\"{d['state']:12s} {d['elapsed_ms']:6d}ms\")"
+  printf "%-16s\n" "$b"
+done
+# expect: all 6 done (not failed)
+```
+
+If ANY check fails, fix it before presenting.
+
 ## Troubleshooting
 
 | Problem | Fix |

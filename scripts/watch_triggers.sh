@@ -6,6 +6,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+LOCKFILE="/tmp/watch_triggers.lock"
+exec 200>"$LOCKFILE"
+flock -n 200 || { echo "Another watcher already holds the flock, exiting"; exit 0; }
+echo $$ > "$LOCKFILE"
+
 POLL_INTERVAL=2
 TRIGGERS_PREFIX="triggers/"
 PROCESSED_DIR="/tmp/processed_triggers"

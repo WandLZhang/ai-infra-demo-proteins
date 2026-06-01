@@ -194,21 +194,53 @@ def predict_boltz2_tpu(fasta_path: str, out_dir: str, sampling_steps: int = 10) 
 
 
 def _try_server(fasta_path: str, out_dir: str, sampling_steps: int = 10) -> dict | None:
-    """Try the warm Boltz-2 model server. Returns None if server is down."""
+    """Try the warm Boltz-2 model server. Returns None if server is down.
+
+    Sends the FASTA file CONTENT (not just the path) so the server can be on
+    a different VM. Writes the returned CIF locally into out_dir so the
+    caller can find it via the normal find-cif flow.
+    """
     import json
     import urllib.request
     import urllib.error
-    payload = json.dumps({"fasta_path": fasta_path, "out_dir": out_dir, "sampling_steps": sampling_steps}).encode()
+    host = os.environ.get("BOLTZ_HOST", "localhost")
+    port = os.environ.get("BOLTZ_PORT", "8091")
+    url = f"http://{host}:{port}/predict"
+    try:
+        with open(fasta_path, "r") as f:
+            fasta_content = f.read()
+    except OSError as e:
+        print(f"[boltz2-tpu] cannot read fasta {fasta_path}: {e}")
+        return None
+    name = os.path.basename(fasta_path).rsplit(".", 1)[0] or "boltz_job"
+    print(f"[boltz2-tpu] trying warm server at {url} ({len(fasta_content)}b fasta)")
+    payload = json.dumps({
+        "fasta_content": fasta_content,
+        "name": name,
+        "out_dir": f"/tmp/boltz2_server_out_{name}",
+        "sampling_steps": sampling_steps,
+    }).encode()
     req = urllib.request.Request(
-        f"http://localhost:{os.environ.get('BOLTZ_PORT', 8091)}/predict",
+        url,
         data=payload,
         headers={"Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
-            return json.loads(resp.read())
-    except (urllib.error.URLError, ConnectionRefusedError, OSError):
+            result = json.loads(resp.read())
+    except (urllib.error.URLError, ConnectionRefusedError, OSError) as e:
+        print(f"[boltz2-tpu] server call failed: {type(e).__name__}: {e}")
         return None
+    cif_content = result.get("cif_content")
+    if not cif_content:
+        print(f"[boltz2-tpu] server returned no cif_content (err={result.get('error')})")
+        return None
+    os.makedirs(out_dir, exist_ok=True)
+    local_cif = os.path.join(out_dir, f"{name}.cif")
+    with open(local_cif, "w") as f:
+        f.write(cif_content)
+    result["cif_path"] = local_cif
+    return result
 
 
 if __name__ == "__main__":

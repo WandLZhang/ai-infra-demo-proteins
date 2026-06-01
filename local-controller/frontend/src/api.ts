@@ -110,6 +110,17 @@ export async function pollEvents(): Promise<SlurmEvent[]> {
   return events
 }
 
+export interface TpuStatus {
+  esmfold: boolean
+  boltz2: boolean
+  status: 'ready' | 'loading' | 'offline'
+  ts: string
+}
+
+export async function pollTpuStatus(): Promise<TpuStatus | null> {
+  return fetchGcsJson('tpu-status.json')
+}
+
 export function blobToLaneStatus(blob: LaneStatusBlob, backendId: BackendId): Partial<LaneStatus> {
   return {
     backendId,
