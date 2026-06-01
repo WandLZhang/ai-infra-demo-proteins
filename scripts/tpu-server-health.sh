@@ -41,19 +41,26 @@ fi
 # ── 3. Fix slurmuser scratch perms (cheap, always safe) ──────────
 docker exec $CONTAINER bash -c 'chmod -R 777 /tmp/.gsutil /tmp/.config /tmp/protein-demo /tmp/numba_cache 2>/dev/null; chmod 666 /tmp/*.log /tmp/*.fasta /tmp/*.pdb /tmp/tpu-model-server.pid 2>/dev/null; mkdir -p /tmp/numba_cache && chmod 777 /tmp/numba_cache' 2>/dev/null
 
-# ── 4. ESMFold server alive? HTTP is the source of truth. ────────
-# Frontend badge:
-#   server responds                  → "ready"   (XLA cache is hot for *some* shapes;
-#                                                  cold shapes pay one-time ~60s compile on demand)
-#   server process exists, no HTTP   → "loading" (mid-compile / mid-startup)
-#   no server process                → "offline" → fall through to restart block
+# ── 4. ESMFold server alive AND prewarm sentinel fresh? ──────────
+# Frontend badge contract — "ready" means brca1's shape is currently HOT
+# on BOTH warm servers (TPU will win the next press), nothing weaker:
+#   server responds + sentinel <  9 min → "ready"
+#   server responds + sentinel ≥  9 min → "loading"  (XLA cache may have evicted,
+#                                                      next keep-warm cron should refresh it)
+#   server process exists, no HTTP      → "loading"  (mid-compile / mid-startup)
+#   no server process                   → "offline" → fall through to restart block
 #
-# Earlier versions gated "ready" on a /tmp/tpu-prewarm-done sentinel < 10min
-# old. With a 25-min keep-warm cycle that resets the sentinel at start, the
-# badge was "loading" ~88% of the time even when the server was perfectly
-# responsive. Dropped the sentinel gate — server-up is the only honest signal.
+# 9-min threshold: keep-warm cron fires every 5 min and the brca1-only
+# prewarm takes ~80s warm path (~13s ESMFold + ~13s Boltz-2 + RPC overhead).
+# So the sentinel mtime is normally <6 min old. Two missed cycles → loading.
+SENTINEL_AGE=$(docker exec $CONTAINER bash -c 'if [ -f /tmp/tpu-prewarm-done ]; then echo $(( $(date +%s) - $(stat -c %Y /tmp/tpu-prewarm-done) )); else echo 99999; fi' 2>/dev/null || echo 99999)
+
 if curl -sf -m 5 http://localhost:8090/ > /dev/null 2>&1; then
-  echo '{"status":"ready"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
+  if [ "$SENTINEL_AGE" -lt 540 ]; then
+    echo '{"status":"ready"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
+  else
+    echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
+  fi
   exit 0
 fi
 
