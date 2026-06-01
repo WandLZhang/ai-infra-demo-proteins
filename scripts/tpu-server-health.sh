@@ -41,28 +41,19 @@ fi
 # ── 3. Fix slurmuser scratch perms (cheap, always safe) ──────────
 docker exec $CONTAINER bash -c 'chmod -R 777 /tmp/.gsutil /tmp/.config /tmp/protein-demo /tmp/numba_cache 2>/dev/null; chmod 666 /tmp/*.log /tmp/*.fasta /tmp/*.pdb /tmp/tpu-model-server.pid 2>/dev/null; mkdir -p /tmp/numba_cache && chmod 777 /tmp/numba_cache' 2>/dev/null
 
-# ── 4. ESMFold server alive? HTTP first (source of truth), pgrep fallback ─
-# Pid file can be stale/empty (docker exec -d's $! often doesn't propagate
-# through the detached bash subshell). Trust HTTP if it answers — never
-# restart a server that's actually serving.
+# ── 4. ESMFold server alive? HTTP is the source of truth. ────────
+# Frontend badge:
+#   server responds                  → "ready"   (XLA cache is hot for *some* shapes;
+#                                                  cold shapes pay one-time ~60s compile on demand)
+#   server process exists, no HTTP   → "loading" (mid-compile / mid-startup)
+#   no server process                → "offline" → fall through to restart block
 #
-# Frontend badge logic — only "ready" means TPU is warm RIGHT NOW:
-#   server dead                                  → "offline"
-#   server alive, no sentinel OR sentinel stale  → "loading"
-#   server alive, sentinel younger than 25 min   → "ready"
-#
-# Eager-mode XLA cache evicts after hours of idle. The keep-warm cron
-# refreshes the sentinel every 20 min by re-firing all 12 shapes. If two
-# consecutive keep-warm runs miss (e.g. demo in flight blocks them), the
-# sentinel ages past 25 min and the badge correctly downgrades to loading.
-SENTINEL_AGE=$(docker exec $CONTAINER bash -c 'if [ -f /tmp/tpu-prewarm-done ]; then echo $(( $(date +%s) - $(stat -c %Y /tmp/tpu-prewarm-done) )); else echo 99999; fi' 2>/dev/null || echo 99999)
-
+# Earlier versions gated "ready" on a /tmp/tpu-prewarm-done sentinel < 10min
+# old. With a 25-min keep-warm cycle that resets the sentinel at start, the
+# badge was "loading" ~88% of the time even when the server was perfectly
+# responsive. Dropped the sentinel gate — server-up is the only honest signal.
 if curl -sf -m 5 http://localhost:8090/ > /dev/null 2>&1; then
-  if [ "$SENTINEL_AGE" -lt 600 ]; then  # 10 min — matches eager XLA cache eviction window
-    echo '{"status":"ready"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
-  else
-    echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
-  fi
+  echo '{"status":"ready"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
   exit 0
 fi
 

@@ -34,10 +34,11 @@ fi
 echo $$ > "$PIDFILE"
 trap "rm -f $PIDFILE" EXIT INT TERM
 
-# Clear sentinel + mark "loading" so the frontend badge shows orange until
-# all 12 (6 proteins × 2 servers) inference shapes have been compiled.
+# Clear sentinel. NOT writing status="loading" here — tpu-server-health.sh
+# owns the badge based on actual HTTP server response, and prewarm is just
+# a background XLA cache refresh that shouldn't flip the badge to red while
+# the server is still happily serving real demo requests.
 rm -f "$SENTINEL"
-echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null || true
 
 # Sequences (must match run_backend.sh)
 declare -A SEQ
