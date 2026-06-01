@@ -33,14 +33,24 @@ echo "[1/7] Creating deploy directory..."
 ssh_cmd "sudo mkdir -p $DEPLOY_DIR && sudo chown \$(whoami) $DEPLOY_DIR"
 
 echo "[2/7] Uploading scripts..."
+# SCP to /tmp first, then sudo mv into $DEPLOY_DIR. Files in $DEPLOY_DIR
+# from prior deploys are root-owned (chmod +x via sudo earlier), so direct
+# scp overwrite fails with Permission denied even though the directory
+# itself is user-owned. /tmp is always writable; sudo mv works.
 gcloud compute scp \
   "$SCRIPT_DIR/predict.sh" \
   "$SCRIPT_DIR/run_backend.sh" \
   "$SCRIPT_DIR/watch_triggers.sh" \
   "$SCRIPT_DIR/poll_squeue.sh" \
   "$SCRIPT_DIR/env.sh" \
-  "$VM:$DEPLOY_DIR/" \
+  "$VM:/tmp/" \
   --zone="$ZONE" --project="$PROJECT" --tunnel-through-iap 2>&1 | grep -v "To increase"
+ssh_cmd "
+  for f in predict.sh run_backend.sh watch_triggers.sh poll_squeue.sh env.sh; do
+    sudo mv /tmp/\$f $DEPLOY_DIR/\$f
+    sudo chmod +x $DEPLOY_DIR/\$f
+  done
+"
 
 echo "[3/7] Installing Python dependencies..."
 ssh_cmd "
