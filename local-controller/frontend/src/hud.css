@@ -72,6 +72,10 @@
   from { opacity: 0; filter: blur(6px); }
   to   { opacity: 1; filter: blur(0); }
 }
+@keyframes softPulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.85; }
+}
 .bucket-label {
   display: inline-block;          /* size tightly to text */
   transform: translate(-50%, -50%);

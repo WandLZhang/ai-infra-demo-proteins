@@ -10,28 +10,27 @@ interface InfoButtonProps {
   variant?: Variant
 }
 
+// Hero = popover with different position + size only. Pure opacity fade —
+// no scale, no slide. Hero's translate(-50%, -50%) is static (centers the
+// box) and never animates.
 const POPOVER_STYLE: React.CSSProperties = {
   position: 'fixed', top: 60, right: 16, zIndex: 30, width: '34vw',
   maxHeight: 'calc(100vh - 96px)',
   backdropFilter: 'blur(10px)',
-  transformOrigin: 'top right', overflow: 'hidden',
+  overflow: 'hidden',
 }
 
 const HERO_STYLE: React.CSSProperties = {
-  position: 'fixed', top: '50%', left: '50%', zIndex: 30,
-  width: '58vw',
+  position: 'fixed', top: '50%', left: '50%', zIndex: 30, width: '58vw',
   maxHeight: '82vh',
-  background: '#000',
-  border: '1.5px solid #09d3ac',
-  boxShadow: '0 0 28px rgba(9, 211, 172, 0.35), inset 0 0 18px rgba(9, 211, 172, 0.04)',
-  transformOrigin: 'center center', overflow: 'hidden',
+  backdropFilter: 'blur(10px)',
+  transform: 'translate(-50%, -50%)',
+  overflow: 'hidden',
 }
 
 export default function InfoButton({ title, sections, open, onToggle, variant = 'popover' }: InfoButtonProps) {
   const isHero = variant === 'hero'
   const baseStyle = isHero ? HERO_STYLE : POPOVER_STYLE
-  const openTransform = isHero ? 'translate(-50%, -50%) scale(1)' : 'scale(1) translateY(0)'
-  const closedTransform = isHero ? 'translate(-50%, -50%) scale(0.95)' : 'scale(0.95) translateY(-10px)'
 
   return (
     <>
@@ -44,16 +43,16 @@ export default function InfoButton({ title, sections, open, onToggle, variant = 
 
       <div style={{
         ...baseStyle,
-        transform: open ? openTransform : closedTransform,
         opacity: open ? 1 : 0,
         pointerEvents: open ? 'auto' as const : 'none' as const,
-        transition: 'opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        transition: 'opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
       }}>
-        <div style={{ maxHeight: isHero ? '82vh' : 'calc(100vh - 96px)', overflowY: 'auto', padding: isHero ? '28px 36px' : '20px 24px' }}>
-          {/* key={title} forces remount on slide change so the fade animation re-fires */}
-          <div className="info-content-wrap" key={title}>
+        <div style={{ maxHeight: isHero ? '82vh' : 'calc(100vh - 96px)', overflowY: 'auto', padding: '20px 24px' }}>
+          {/* key includes body identity so cross-dissolve fires even when title is shared
+              across slides (e.g. all three models* slides share the same hero title). */}
+          <div className="info-content-wrap" key={title + (sections[0]?.body.slice(0, 40) ?? '')}>
             <div style={{
-              fontSize: isHero ? 22 : 18, color: '#09d3ac', marginBottom: isHero ? 18 : 14,
+              fontSize: 18, color: '#09d3ac', marginBottom: 14,
               fontFamily: "'BaronNeue-Regular', sans-serif",
               textTransform: 'uppercase' as const, letterSpacing: '0.12em', fontWeight: 400,
             }}>
@@ -64,7 +63,7 @@ export default function InfoButton({ title, sections, open, onToggle, variant = 
                 <div
                   className="info-body"
                   style={{
-                    fontSize: isHero ? 14 : 13, lineHeight: 1.55, color: '#d3d3d3',
+                    fontSize: 13, lineHeight: 1.55, color: '#d3d3d3',
                     fontFamily: "'Google Sans', sans-serif",
                     whiteSpace: 'pre-wrap' as const,
                   }}
