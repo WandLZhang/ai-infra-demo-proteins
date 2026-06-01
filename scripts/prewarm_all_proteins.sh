@@ -34,11 +34,13 @@ fi
 echo $$ > "$PIDFILE"
 trap "rm -f $PIDFILE" EXIT INT TERM
 
-# Clear sentinel. NOT writing status="loading" here — tpu-server-health.sh
-# owns the badge based on actual HTTP server response, and prewarm is just
-# a background XLA cache refresh that shouldn't flip the badge to red while
-# the server is still happily serving real demo requests.
-rm -f "$SENTINEL"
+# Do NOT delete the sentinel here. The sentinel's mtime is the SOLE truth
+# source for "last time all 12 shapes were touched". If we deleted it at
+# start, the badge would lie about warmth during the prewarm cycle itself
+# (sentinel briefly missing → badge=loading even though most shapes are
+# still hot from the previous cycle). Letting the old mtime persist until
+# the new `touch` overwrites it at end means: sentinel age = age of last
+# SUCCESSFUL warm-up. Health cron compares this age to its threshold.
 
 # Sequences (must match run_backend.sh)
 declare -A SEQ
@@ -49,7 +51,12 @@ SEQ[hemoglobin]="MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKV
 SEQ[insulin]="LRELGQGSFGMVYEGNARDIIKGEAETRVAVKTVNESASLRERIEFLNEASVMKGFTCHHVVRLLGVVSKGQPTLVVMELMAHGDLKSYLRSLRPEAENNPGRPPPTLQEMIQMAAEIADGMAYLNAKKFVHRDLAARNCMVAH"
 SEQ[cftr]="FSLLGTPVLKDINFKIERGQLLAVAGSTGAGKTSLLMVIMGELEPSEGKIKHSGRISFCSQFSWIMPGTIKENIIFGVSYDEYRYRSVIKACQLEEDISKFAEKDNIVLGEGGITLSGGQRARISLARAVYKDADLYLLDSPFGYLDVLTEKEIFESCVCKLMANKTRILVTSKMEHLKKADKILILHEGSSYFYGTFSELQNLQPDFSSKLMGCDSFDQFSAERRNSILTETLHRFSLEGDAPVSWTETK"
 
-PROTEINS=(hemoglobin brca1 p53 ace2 insulin cftr)
+# BRCA1-only: the talk track defaults to brca1 and warming 6 shapes evicted
+# each other under HBM pressure on the v6e-4 (the very thing we were trying
+# to prevent). Switching to anything else in the demo costs a one-time cold
+# compile on first press (~66s ESMFold, ~125s Boltz-2). Worth it for a
+# rock-solid warm cycle on the actual demo protein.
+PROTEINS=(brca1)
 
 echo "===== Pre-warming ESMFold ($ESM_URL) ====="
 # X-Keepwarm: true tells the server these are low-priority — a real Slurm
@@ -73,13 +80,10 @@ echo "===== Pre-warming Boltz-2 ($BOLTZ_URL) ====="
 # inside ssh inside gcloud chains is unreliable for embedded newlines.
 python3 <<PYEOF
 import json, time, urllib.request, urllib.error
+# brca1-only (matches the bash PROTEINS list above). If you change PROTEINS,
+# change this list too — they are NOT linked.
 proteins = [
-    ("hemoglobin", """${SEQ[hemoglobin]}"""),
     ("brca1",      """${SEQ[brca1]}"""),
-    ("p53",        """${SEQ[p53]}"""),
-    ("ace2",       """${SEQ[ace2]}"""),
-    ("insulin",    """${SEQ[insulin]}"""),
-    ("cftr",       """${SEQ[cftr]}"""),
 ]
 for name, seq in proteins:
     fasta = f">A|protein\n{seq}\n"
