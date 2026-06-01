@@ -33,17 +33,12 @@ export default function ProteinViewer({ visible }: ProteinViewerProps) {
   const lastUpdatedRef = useRef<string | null>(null)
   const [timestampLabel, setTimestampLabel] = useState<string>('')
 
-  // Reset cached "last updated" each time we re-mount so we always re-fetch the PDB.
-  useEffect(() => {
-    if (!visible) return
-    lastUpdatedRef.current = null
-  }, [visible])
-
   // Initialize viewer once when visible flips true.
   useEffect(() => {
     if (!visible || !containerRef.current) return
     let cancelled = false
     let pollId: ReturnType<typeof setInterval> | null = null
+    const controller = new AbortController()
 
     async function init() {
       // Dynamic import keeps 3dmol out of any code path that doesn't need it.
@@ -61,13 +56,13 @@ export default function ProteinViewer({ visible }: ProteinViewerProps) {
 
     async function refreshIfNew() {
       try {
-        const metaResp = await fetch(PDB_METADATA_URL, { cache: 'no-store' })
+        const metaResp = await fetch(PDB_METADATA_URL, { cache: 'no-store', signal: controller.signal })
         if (!metaResp.ok) return
-        const meta = await metaResp.json()
-        const updated: string = meta.updated
+        const meta: { updated: string } = await metaResp.json()
+        const updated = meta.updated
         if (lastUpdatedRef.current === updated) return  // no new run since last poll
 
-        const pdbResp = await fetch(PDB_URL, { cache: 'no-store' })
+        const pdbResp = await fetch(PDB_URL, { cache: 'no-store', signal: controller.signal })
         if (!pdbResp.ok) return
         const pdbText = await pdbResp.text()
 
@@ -83,7 +78,7 @@ export default function ProteinViewer({ visible }: ProteinViewerProps) {
         lastUpdatedRef.current = updated
         setTimestampLabel(formatEst(updated))
       } catch {
-        // Per spec: no fallback, no error UI. Silent on failure; manual fix on demo day.
+        // Per spec: silent on failure (includes AbortError from cleanup).
       }
     }
 
@@ -91,9 +86,13 @@ export default function ProteinViewer({ visible }: ProteinViewerProps) {
 
     return () => {
       cancelled = true
+      controller.abort()
       if (pollId) clearInterval(pollId)
       if (viewerRef.current) {
-        try { viewerRef.current.clear() } catch { /* viewer torn down */ }
+        try {
+          viewerRef.current.spin(false)
+          viewerRef.current.clear()
+        } catch { /* viewer torn down */ }
         viewerRef.current = null
       }
     }
