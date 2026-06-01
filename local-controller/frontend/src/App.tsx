@@ -5,6 +5,7 @@ import InfraMap, { type ZoneInfo, BIOWULF_HOME } from './components/InfraMap'
 import type { MarkerState } from './components/ZoneMarker'
 import SideLadder from './components/SideLadder'
 import InfoButton from './components/InfoButton'
+import ProteinViewer from './components/ProteinViewer'
 import type { Protein, ModelId, BackendId, LaneStatus, PredictResponse } from './types'
 import { BACKENDS } from './backends'
 import { submitRun, pollStatus, pollEvents, pollTpuStatus, type TpuStatus } from './api'
@@ -19,7 +20,7 @@ const PROTEINS: Protein[] = [
 ]
 
 // UX phases: zoomed on Building 12 → terminal → submit → zoom out → catalog → catalog2 → results
-type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'pd1' | 'pd2' | 'img' | 'gen' | 'tpu1' | 'tpu2' | 'tpu3' | 'done'
+type Phase = 'home' | 'dispatching' | 'running' | 'catalog' | 'catalog2' | 'catalog3' | 'catalog4' | 'md1' | 'md2' | 'md3' | 'pd1' | 'pd2' | 'img' | 'gen' | 'tpu1' | 'tpu2' | 'tpu3' | 'models1' | 'models2' | 'models3' | 'done'
 
 function initLaneStatus(backendId: BackendId): LaneStatus {
   const b = BACKENDS.find(b => b.id === backendId)!
@@ -46,6 +47,7 @@ export default function App() {
   const isMd = phase === 'md1' || phase === 'md2' || phase === 'md3'
   const isPd1 = phase === 'pd1'  // pd1 stays zoomed on us-central1 with Hyperdisk hub
   const isTpu = phase === 'tpu1' || phase === 'tpu2' || phase === 'tpu3'
+  const isModels = phase === 'models1' || phase === 'models2' || phase === 'models3'
   const sideLadderHighlight: BackendId[] =
     phase === 'tpu2' ? ['af2-tpu', 'esmfold-tpu', 'boltz2-tpu'] :
     phase === 'tpu3' ? ['esmfold-tpu', 'esmfold-gpu'] :
@@ -302,11 +304,17 @@ export default function App() {
         else if (phase === 'gen') setPhase('tpu1')
         else if (phase === 'tpu1') setPhase('tpu2')
         else if (phase === 'tpu2') setPhase('tpu3')
-        // 'tpu3' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
+        else if (phase === 'tpu3') setPhase('models1')
+        else if (phase === 'models1') setPhase('models2')
+        else if (phase === 'models2') setPhase('models3')
+        // 'models3' is the final manual slide — auto-advance to 'done' happens only when inference completes (polling)
         // 'done' stays
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        if (phase === 'done') setPhase('tpu3')
+        if (phase === 'done') setPhase('models3')
+        else if (phase === 'models3') setPhase('models2')
+        else if (phase === 'models2') setPhase('models1')
+        else if (phase === 'models1') setPhase('tpu3')
         else if (phase === 'tpu3') setPhase('tpu2')
         else if (phase === 'tpu2') setPhase('tpu1')
         else if (phase === 'tpu1') setPhase('gen')
@@ -447,6 +455,7 @@ export default function App() {
 
       {/* Side ladder — always visible, fills with values as backends complete */}
       <SideLadder lanes={lanes} onSelect={() => {}} highlightBackends={sideLadderHighlight} />
+      <ProteinViewer visible={isModels} />
 
       {/* Location paper — key only changes on home↔cloud transitions, so the protein "comes in"
           on slide 1 → slide 2 and stays put through subsequent slide navigation */}
@@ -467,6 +476,7 @@ export default function App() {
       {/* Info button — top right, same style as hamburger menu */}
       <div style={{ position: 'fixed', top: 15, right: 15, zIndex: 25 }}>
       <InfoButton
+        variant={isModels ? 'hero' : 'popover'}
         open={infoOpen}
         onToggle={() => setInfoOpen(!infoOpen)}
         title={
@@ -487,6 +497,9 @@ export default function App() {
           phase === 'tpu1' ? 'TPUs' :
           phase === 'tpu2' ? 'Why TPU Economics Are Structural' :
           phase === 'tpu3' ? 'TorchTPU: ESMFold in 3 Lines' :
+          phase === 'models1' ? 'AI Models Only Google Has' :
+          phase === 'models2' ? 'AI Models Only Google Has' :
+          phase === 'models3' ? 'AI Models Only Google Has' :
           'Results'
         }
         sections={
@@ -538,6 +551,15 @@ export default function App() {
           ] :
           phase === 'tpu3' ? [
             { body: 'Most of Biowulf\'s researchers write PyTorch. Historically TPU required JAX. <a href="https://developers.googleblog.com/torchtpu-running-pytorch-natively-on-tpus-at-google-scale/" target="_blank">TorchTPU</a> eliminates that requirement by running PyTorch natively on TPU.\n\nESMFold demonstrates the minimal case. The diff between the <a href="https://github.com/WandLZhang/ai-infra-demo-proteins/blob/main/backends/esmfold-gpu/predict.py" target="_blank">GPU backend</a> and the <a href="https://github.com/WandLZhang/ai-infra-demo-proteins/blob/main/backends/esmfold-tpu/predict.py" target="_blank">TPU backend</a> on the inference path is <b>three lines</b>:<pre style="background: #0a0a0a; border: 1px solid #2a2a2a; padding: 12px; margin: 10px 0; overflow-x: auto; font-size: 11px; line-height: 1.45;"><code>import torch\n<span style="color: #09d3ac;">import torch_xla                              # NEW</span>\n<span style="color: #09d3ac;">torch_xla.experimental.eager_mode(True)       # NEW</span>\n<span style="color: #09d3ac;">import torch_xla.core.xla_model as xm         # NEW</span>\n\n<span style="color: #eab308;">device = xm.xla_device()                      # CHANGED (was "cuda")</span>\nmodel = EsmForProteinFolding.from_pretrained(_MODEL_ID).to(device)\nwith torch.no_grad():\n    output = model(**inputs)\n<span style="color: #09d3ac;">xm.mark_step()                                # NEW</span></code></pre>Three changes total: import <code>torch_xla</code> + flip to eager mode, swap the device source, add <code>xm.mark_step()</code> after the forward pass. Same HuggingFace <code>EsmForProteinFolding</code> model class, same <code>.to(device)</code> pattern, same <code>torch.no_grad()</code> block.\n\nTorchTPU is first-class in <a href="https://discuss.google.dev/t/google-cloud-tpus-are-now-a-first-class-accelerator-in-ray/345281" target="_blank">Ray 2.55</a> — the first hardware accelerator to earn that status since NVIDIA GPUs. ESMFold, Boltz-2, RFdiffusion, BindCraft, ModelAngelo, and most of the protein-design stack are PyTorch — all eligible for TPU economics without a JAX rewrite.' },
+          ] :
+          phase === 'models1' ? [
+            { body: 'models1 placeholder — real content in Task 6' },
+          ] :
+          phase === 'models2' ? [
+            { body: 'models2 placeholder — real content in Task 6' },
+          ] :
+          phase === 'models3' ? [
+            { body: 'models3 placeholder — real content in Task 6' },
           ] :
           [
             { body: 'Inference complete — results content TBD.' },
