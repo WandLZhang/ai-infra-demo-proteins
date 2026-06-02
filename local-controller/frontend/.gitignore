@@ -132,3 +132,6 @@ temp/
 # Playwright test output
 test-results/
 tests/screenshots/
+
+# Firebase CLI deploy cache (local-only content hashes)
+.firebase/
