@@ -9,7 +9,6 @@ This README is the complete bring-up manual. Every step assumes you're starting 
 The reference deployment lives at:
 
 - **Frontend** (Cloud Run): `https://protein-demo-frontend-<BURST_PROJECT_NUMBER>.<AR_REGION>.run.app`
-- **Frontend** (Firebase vanity): `https://nih-protein-demo.web.app`
 - **State server** (Cloud Run): `https://protein-demo-server-<BURST_PROJECT_NUMBER>.<AR_REGION>.run.app`
 
 Your URLs will use your own `$BURST_PROJECT_NUMBER` and Firebase site name.
