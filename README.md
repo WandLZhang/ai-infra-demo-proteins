@@ -4,6 +4,8 @@ Live demo: pressing Enter dispatches **6 real protein inference jobs** (3 models
 
 This README is the complete bring-up manual. Every step assumes you're starting from zero and want a working clone. Follow top to bottom and you have the deployment.
 
+![Protein demo](visuals/image.gif)
+
 ## Reference deployment URLs
 
 The reference deployment lives at:
