@@ -1,13 +1,13 @@
 #!/bin/bash
-# deploy_controller.sh — Deploy scripts + configure the biowulf-controller VM.
+# deploy_controller.sh — Deploy scripts + configure the Slurm controller VM.
 #
 # Deploys predict.sh, run_backend.sh, watch_triggers.sh, poll_squeue.sh,
 # env.sh to the controller VM. Installs Python deps. Fixes resume.py
 # shebang. Sets Slurm timeouts for demo pacing. Starts the trigger watcher.
 #
 # Prerequisites:
-#   - gcloud CLI authenticated with IAP tunnel access to the controller project
-#   - biowulf-controller VM running in wz-nih-demo-controller
+#   - gcloud CLI authenticated with IAP tunnel access to $CONTROLLER_PROJECT_ID
+#   - Controller VM running in $CONTROLLER_PROJECT_ID / $CONTROLLER_VM_ZONE
 #   - Slurm 25.05.6 installed and slurmctld running on the VM
 #
 # Usage:
@@ -18,10 +18,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
-VM="biowulf-controller"
-ZONE="us-east5-a"
+VM="$CONTROLLER_VM_NAME"
+ZONE="$CONTROLLER_VM_ZONE"
 PROJECT="$CONTROLLER_PROJECT_ID"
-DEPLOY_DIR="/opt/protein-demo"
+DEPLOY_DIR="${DEPLOY_DIR:-/opt/protein-demo}"
+
+# Look up controller project number for the compute SA email.
+CONTROLLER_PROJECT_NUMBER=$(gcloud projects describe "$CONTROLLER_PROJECT_ID" \
+  --format='value(projectNumber)')
 
 ssh_cmd() {
   gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" --tunnel-through-iap --command="$1" 2>&1 | grep -v "To increase the performance"

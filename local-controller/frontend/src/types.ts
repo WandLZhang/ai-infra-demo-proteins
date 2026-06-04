@@ -63,7 +63,6 @@ export interface TalkTrackPoint {
   triggeredBy: LaneState | 'summary'
 }
 
-// Reused from aero-sim — TpuMetrics modal
 export interface TpuMetrics {
   devices: Array<{ id: number; platform: string; device_kind: string }>
   platform?: {

@@ -50,10 +50,10 @@ echo ""
 gsutil -q -m rm "$JOB_DIR/*.json" 2>/dev/null || true
 gsutil -q -m rm -r "$JOB_DIR/log" 2>/dev/null || true
 
-# Reset Spot nodes
+# Reset Spot nodes — names from cloud.conf for the spot-tpu and spot-gpu partitions
 if command -v scontrol &>/dev/null; then
-  scontrol update NodeName=nihprotein-tpuv6ewest1c-0 State=IDLE 2>/dev/null || true
-  scontrol update NodeName=nihprotein-a100spoteast5-0 State=IDLE 2>/dev/null || true
+  scontrol update NodeName="${SPOT_TPU_NODE:-nihprotein-tpuv6ewest1c-0}" State=IDLE 2>/dev/null || true
+  scontrol update NodeName="${SPOT_GPU_NODE:-nihprotein-a100spoteast5-0}" State=IDLE 2>/dev/null || true
 fi
 
 # Write manifest
@@ -87,7 +87,7 @@ wait
 
 build_wrap() {
   local BACKEND="$1"
-  echo "export HOME=/tmp NUMBA_CACHE_DIR=/tmp/numba_cache; mkdir -p /tmp/numba_cache 2>/dev/null; ulimit -l unlimited 2>/dev/null; chmod 777 /tmp/tpu_logs /tmp/*.log /tmp/*.fasta 2>/dev/null; chmod -R 777 /tmp/.gsutil /tmp/.config /tmp/protein-demo /tmp/result-* /tmp/numba_cache /tmp/af2-features /var/cache/alphafold-params 2>/dev/null; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo/backends/$BACKEND; gsutil -q cp gs://wz-nih-demo-shared/scripts/run_backend.sh gs://wz-nih-demo-shared/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; gsutil -q cp gs://wz-nih-demo-shared/backends/$BACKEND/predict.py /tmp/protein-demo/backends/$BACKEND/predict.py 2>/dev/null || true; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
+  echo "export HOME=/tmp NUMBA_CACHE_DIR=/tmp/numba_cache; mkdir -p /tmp/numba_cache 2>/dev/null; ulimit -l unlimited 2>/dev/null; chmod 777 /tmp/tpu_logs /tmp/*.log /tmp/*.fasta 2>/dev/null; chmod -R 777 /tmp/.gsutil /tmp/.config /tmp/protein-demo /tmp/result-* /tmp/numba_cache /tmp/af2-features /var/cache/alphafold-params 2>/dev/null; rm -rf /tmp/protein-demo 2>/dev/null; mkdir -p /tmp/protein-demo/backends/$BACKEND; gsutil -q cp $SHARED_BUCKET/scripts/run_backend.sh $SHARED_BUCKET/scripts/env.sh /tmp/protein-demo/ 2>/dev/null; gsutil -q cp $SHARED_BUCKET/backends/$BACKEND/predict.py /tmp/protein-demo/backends/$BACKEND/predict.py 2>/dev/null || true; chmod +x /tmp/protein-demo/run_backend.sh 2>/dev/null; bash /tmp/protein-demo/run_backend.sh $BACKEND $PROTEIN_ID"
 }
 
 # ── Phase 1: Submit all to Spot partitions ──
@@ -144,7 +144,7 @@ for BACKEND in "${BACKENDS[@]}"; do
   NODE_FLAG=""
   EXTRA_FLAGS=""
   if [[ "$SILICON" == "tpu" ]]; then
-    NODE_FLAG="--nodelist=nihprotein-tpuv6eeast5a-0"
+    NODE_FLAG="--nodelist=${TPU_ESMFOLD_NODE:-nihprotein-tpuv6eeast5a-0}"
     EXTRA_FLAGS="--exclusive"
     if [[ -n "$PREV_TPU_JOB" ]]; then
       EXTRA_FLAGS="--exclusive --dependency=afterany:$PREV_TPU_JOB"
