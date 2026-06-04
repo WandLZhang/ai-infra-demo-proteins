@@ -23,7 +23,7 @@ Your URLs will use your own `$BURST_PROJECT_NUMBER` and Firebase site name.
 6. TPU jobs hit pre-warmed model servers (ESMFold on the ESMFold VM at port 8090, Boltz-2 on a dedicated VM at port 8091)
 7. Frontend polls GCS events directly + reads `tpu-status.json` for the warm badge
 
-Total wall-clock: **5 of 6 lanes finish within ~3 minutes**; AF2-GPU is the tail and pushes total completion to ~6 minutes (TPU chain serialized on the one v6e, GPU jobs parallel across regions).
+Total wall-clock: **~6 minutes** for all 6 backends (TPU chain serialized on the one v6e, GPU jobs parallel across regions).
 
 ## Architecture
 
