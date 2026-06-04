@@ -26,10 +26,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
-# Only east5a-0 currently has the cron jobs (ESMFold lives there + drives
-# the badge). east5a-3 is Boltz-2-only and doesn't need these scripts.
-TPU_VM="nihprotein-tpuv6eeast5a-0"
-TPU_ZONE="us-east5-a"
+# Only the ESMFold TPU VM currently has the cron jobs (it drives the badge).
+# The Boltz-2 TPU VM doesn't need these scripts.
+TPU_VM="${TPU_VM:-nihprotein-tpuv6eeast5a-0}"
+TPU_ZONE="${TPU_ZONE:-us-east5-a}"
 
 echo "=== Uploading prewarm script to GCS ==="
 gsutil -q cp "$SCRIPT_DIR/prewarm_all_proteins.sh" "$SHARED_BUCKET/scripts/prewarm_all_proteins.sh"
@@ -57,7 +57,7 @@ gcloud compute tpus tpu-vm ssh "$TPU_VM" --zone="$TPU_ZONE" --project="$BURST_PR
   sudo /opt/tpu-server-health.sh
   echo ""
   echo "Current tpu-status.json:"
-  gsutil cat gs://wz-nih-demo-shared/tpu-status.json
+  gsutil cat '"$SHARED_BUCKET"'/tpu-status.json
 ' 2>&1 | grep -v "To increase"
 
 echo ""

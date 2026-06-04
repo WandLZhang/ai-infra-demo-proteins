@@ -5,12 +5,14 @@
 # /api/status reads the 6 backend state blobs. The trigger watcher on the
 # Slurm controller VM picks up the trigger and fires predict.sh.
 #
-# Live URL: https://protein-demo-server-212183265679.us-east5.run.app
+# Cloud Run service URL is printed at the end; paste it into
+# local-controller/frontend/.env as VITE_STATE_SERVER before deploying
+# the frontend.
 #
 # Prerequisites:
-#   - gcloud authenticated with deploy access to wz-nih-demo-burst
-#   - Default compute SA (212183265679-compute@...) has roles/storage.admin
-#     on wz-nih-demo-shared (verified)
+#   - gcloud authenticated with deploy access to $BURST_PROJECT_ID
+#   - Default compute SA ($BURST_PROJECT_NUMBER-compute@...) has
+#     roles/storage.admin on $SHARED_BUCKET
 #
 # Usage:
 #   bash scripts/deploy_server.sh
@@ -21,9 +23,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
 SERVER_DIR="$REPO_ROOT/local-controller"
-SERVICE="protein-demo-server"
-REGION="us-east5"
+SERVICE="${SERVICE:-protein-demo-server}"
+REGION="${REGION:-$AR_REGION}"
 PROJECT="$BURST_PROJECT_ID"
+BUCKET_NAME="${SHARED_BUCKET#gs://}"
 
 echo "=== Deploying $SERVICE to Cloud Run ==="
 echo "  Project: $PROJECT"
@@ -41,7 +44,7 @@ gcloud run deploy "$SERVICE" \
   --memory=512Mi \
   --cpu=1 \
   --max-instances=10 \
-  --set-env-vars="STATE_BUCKET=wz-nih-demo-shared"
+  --set-env-vars="STATE_BUCKET=$BUCKET_NAME"
 
 echo ""
 echo "=== Done ==="

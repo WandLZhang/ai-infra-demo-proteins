@@ -16,6 +16,7 @@ docs/superpowers/
 .env
 .env.*
 !.env.example
+!.env.sample
 *.pem
 *.key
 *.cert
@@ -127,7 +128,6 @@ desktop.ini
 tmp/
 temp/
 *.tar.gz
-.env*
 
 # Playwright test output
 test-results/

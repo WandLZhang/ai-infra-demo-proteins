@@ -5,24 +5,32 @@
 # server has every shape cold until it's been seen once. This script pays
 # that cost up-front so any press-Enter during the demo hits warm cache.
 #
-# Run on the east5a-0 host (or via gcloud ssh into it). Boltz-2 calls go
-# over the internal network to 10.202.0.23.
+# Run on the ESMFold TPU VM (or its slurmd container). Boltz-2 calls go
+# over the internal network to the Boltz-2 VM (see BOLTZ_HOST below).
 #
 # Expected wall-clock on a fresh server:
 #   ESMFold: 6 shapes × ~70s = ~7 min
 #   Boltz-2: 6 shapes × ~60s = ~6 min
 # Total in parallel: ~7 min.
 #
+# Reads /opt/env.sh or env.sh in the same directory if present, for
+# SHARED_BUCKET and BOLTZ_HOST overrides.
+#
 # Usage:
 #   bash prewarm_all_proteins.sh
 
 set -uo pipefail
+[ -r /opt/env.sh ] && source /opt/env.sh
+[ -r "$(dirname "$0")/env.sh" ] && source "$(dirname "$0")/env.sh"
 
-ESM_URL="http://localhost:8090/predict"
-BOLTZ_URL="http://10.202.0.23:8091/predict"
+ESM_URL="${ESM_URL:-http://localhost:8090/predict}"
+BOLTZ_HOST="${BOLTZ_HOST:-10.202.0.23}"
+BOLTZ_PORT="${BOLTZ_PORT:-8091}"
+BOLTZ_URL="${BOLTZ_URL:-http://${BOLTZ_HOST}:${BOLTZ_PORT}/predict}"
+SHARED_BUCKET="${SHARED_BUCKET:-gs://wz-nih-demo-shared}"
 SENTINEL="/tmp/tpu-prewarm-done"
 PIDFILE="/tmp/tpu-prewarm.pid"
-STATUS_BLOB="gs://wz-nih-demo-shared/tpu-status.json"
+STATUS_BLOB="$SHARED_BUCKET/tpu-status.json"
 
 # Pid-file based mutex (pgrep self-matches because keep-warm's bash -c
 # command line contains "prewarm_all_proteins.sh" — caused every cron

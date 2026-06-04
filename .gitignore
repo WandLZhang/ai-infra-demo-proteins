@@ -1,11 +1,39 @@
+# Dependencies + build output
 node_modules/
 dist/
+build/
 .venv/
 venv/
 __pycache__/
 *.pyc
-.env
 *.egg-info/
+
+# Secrets + local config (every fork has its own)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+credentials.json
+
+# Terraform state + plans (use a remote backend instead)
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/
+.terraform.lock.hcl
+
+# Cluster Toolkit deployment artifacts (regeneratable, multi-MB)
 deployment/
+
+# Firebase CLI deploy cache (local-only content hashes)
+.firebase/
+
+# Test output
+test-results/
+playwright-report/
+
+# Internal scratch / agent state
 .superpowers/
 docs/superpowers/

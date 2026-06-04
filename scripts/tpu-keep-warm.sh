@@ -11,9 +11,12 @@
 #     Slurm job is currently using the TPU; don't compete
 #
 # Install: */20 * * * * /opt/tpu-keep-warm.sh >> /tmp/tpu-keepwarm.log 2>&1
+# Reads /opt/env.sh if present for SHARED_BUCKET override.
 
 set -uo pipefail
-CONTAINER=slurmd
+[ -r /opt/env.sh ] && source /opt/env.sh
+CONTAINER="${CONTAINER:-slurmd}"
+SHARED_BUCKET="${SHARED_BUCKET:-gs://wz-nih-demo-shared}"
 BUSY_FILE_MAX_AGE=600   # seconds — if /tmp/tpu-busy is newer than this, skip
 
 # Skip only if a real prewarm.pid exists AND that pid is alive in the container.
@@ -39,5 +42,5 @@ if ! curl -sf -m 5 http://localhost:8090/ > /dev/null 2>&1; then
 fi
 
 echo "$(date) keep-warm START"
-docker exec $CONTAINER bash -c 'gsutil -q cp gs://wz-nih-demo-shared/scripts/prewarm_all_proteins.sh /tmp/prewarm_all_proteins.sh && chmod +x /tmp/prewarm_all_proteins.sh && bash /tmp/prewarm_all_proteins.sh' 2>&1 | tail -30
+docker exec $CONTAINER bash -c "gsutil -q cp $SHARED_BUCKET/scripts/prewarm_all_proteins.sh /tmp/prewarm_all_proteins.sh && chmod +x /tmp/prewarm_all_proteins.sh && bash /tmp/prewarm_all_proteins.sh" 2>&1 | tail -30
 echo "$(date) keep-warm DONE"

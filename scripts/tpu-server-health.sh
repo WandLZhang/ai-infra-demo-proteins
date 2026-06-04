@@ -1,20 +1,23 @@
 #!/bin/bash
-# tpu-server-health.sh — Cron on the east5a-0 TPU VM host (every 5 min).
+# tpu-server-health.sh — Cron on the ESMFold TPU VM host (every 5 min).
 #
 # Behavior:
 #   1. If disk > 75%, clean ephemeral state inside slurmd.
 #   2. If the ESMFold server PID is alive, do NOTHING. Never kill a working server.
 #   3. If the server process is dead, restart it as slurmuser and fire a warmup
 #      POST in the background so the next real Slurm job hits a warm XLA cache.
-#   4. Push the current server status to gs://wz-nih-demo-shared/tpu-status.json
+#   4. Push the current server status to $SHARED_BUCKET/tpu-status.json
 #      so the frontend badge reflects reality.
 #
 # Install: */5 * * * * /opt/tpu-server-health.sh >> /tmp/tpu-health.log 2>&1
+# Reads /opt/env.sh if present for SHARED_BUCKET + SLURMUSER_UID overrides.
 
 set -uo pipefail
-CONTAINER=slurmd
-STATUS_BLOB="gs://wz-nih-demo-shared/tpu-status.json"
-SLURMUSER_UID=1015145168
+[ -r /opt/env.sh ] && source /opt/env.sh
+CONTAINER="${CONTAINER:-slurmd}"
+SHARED_BUCKET="${SHARED_BUCKET:-gs://wz-nih-demo-shared}"
+STATUS_BLOB="$SHARED_BUCKET/tpu-status.json"
+SLURMUSER_UID="${SLURMUSER_UID:-1015145168}"
 
 # ── 1. Disk + memory hygiene ──────────────────────────────────────
 DISK_PCT=$(df / --output=pcent 2>/dev/null | tail -1 | tr -d ' %')
@@ -89,7 +92,7 @@ for i in $(seq 1 120); do
     # Pre-warm all 6 demo protein shapes on BOTH ESMFold (local) and
     # Boltz-2 (east5a-3) so the badge only flips to "ready" once any
     # protein the user picks will hit warm cache.
-    docker exec $CONTAINER bash -c 'gsutil -q cp gs://wz-nih-demo-shared/scripts/prewarm_all_proteins.sh /tmp/prewarm_all_proteins.sh && chmod +x /tmp/prewarm_all_proteins.sh' 2>/dev/null
+    docker exec $CONTAINER bash -c "gsutil -q cp $SHARED_BUCKET/scripts/prewarm_all_proteins.sh /tmp/prewarm_all_proteins.sh && chmod +x /tmp/prewarm_all_proteins.sh" 2>/dev/null
     docker exec -d $CONTAINER bash -c 'bash /tmp/prewarm_all_proteins.sh > /tmp/tpu-prewarm.log 2>&1'
     echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
     exit 0
