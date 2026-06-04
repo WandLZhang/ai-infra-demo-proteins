@@ -264,11 +264,16 @@ export default function App() {
   const handleSubmit = useCallback(async () => {
     try {
       const result = await submitRun(currentProtein.id)
-      // Always reset terminal + lanes for a clean replay
-      setDispatchLines([])
-      setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
-      setZoneStates({})
-      setVmStates({})
+      // already_running = the server saw an in-flight run and didn't write a
+      // new trigger. Skip the local-state reset and just attach to the
+      // existing run via polling. Without this skip, a second-presser's tab
+      // wipes its own lanes and looks like it submitted, then "waits".
+      if (!result.already_running) {
+        setDispatchLines([])
+        setLanes(Object.fromEntries(BACKENDS.map(b => [b.id, initLaneStatus(b.id)])) as Record<BackendId, LaneStatus>)
+        setZoneStates({})
+        setVmStates({})
+      }
       setPhase('running')
       startPolling()
     } catch (err) {
