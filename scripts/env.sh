@@ -30,7 +30,13 @@ export SHARED_BUCKET="${SHARED_BUCKET:-gs://wz-nih-demo-shared}"
 
 # Boltz-2 warm server lives on east5a-3 (dedicated v6e for full HBM headroom).
 # ESMFold warm server lives on east5a-0 (same VM that runs Slurm jobs → localhost).
-export BOLTZ_HOST="${BOLTZ_HOST:-10.202.0.23}"
+# Override-able: set BOLTZ_HOST yourself (colleagues in another project should), else it
+# resolves from $SHARED_BUCKET/config/boltz_host (the live value recreate_boltz2_tpu.sh
+# publishes when the QR — and thus the node IP — is recreated), else a last-known fallback.
+# NOTE: long-running processes that source this (the trigger-watcher) pin BOLTZ_HOST in their
+# environment, so after the IP changes they must be restarted to pick it up —
+# recreate_boltz2_tpu.sh does that automatically.
+export BOLTZ_HOST="${BOLTZ_HOST:-$(gsutil -q cat ${SHARED_BUCKET:-gs://wz-nih-demo-shared}/config/boltz_host 2>/dev/null || echo 10.202.0.30)}"
 export BOLTZ_PORT="${BOLTZ_PORT:-8091}"
 
 # Artifact Registry — backend containers

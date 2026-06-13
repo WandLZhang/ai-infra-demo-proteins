@@ -24,7 +24,7 @@ set -uo pipefail
 [ -r "$(dirname "$0")/env.sh" ] && source "$(dirname "$0")/env.sh"
 
 ESM_URL="${ESM_URL:-http://localhost:8090/predict}"
-BOLTZ_HOST="${BOLTZ_HOST:-10.202.0.23}"
+BOLTZ_HOST="${BOLTZ_HOST:-10.202.0.30}"
 BOLTZ_PORT="${BOLTZ_PORT:-8091}"
 BOLTZ_URL="${BOLTZ_URL:-http://${BOLTZ_HOST}:${BOLTZ_PORT}/predict}"
 SHARED_BUCKET="${SHARED_BUCKET:-gs://wz-nih-demo-shared}"
@@ -41,6 +41,37 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; the
 fi
 echo $$ > "$PIDFILE"
 trap "rm -f $PIDFILE" EXIT INT TERM
+
+# ── Authoritative run-state gate ─────────────────────────────────────────────
+# Keep-warm/prewarm POSTs go DIRECTLY to the warm servers, bypassing the 3-layer submit
+# guard (frontend audience / Cloud Run already_running / predict.sh squeue). So we apply the
+# SAME authoritative check here: if any backend is mid-run, do NOT hit the servers — a
+# keep-warm POST racing a real job at the shared server corrupts the job's result (this is
+# what made boltz2-tpu "failed"). /tmp/tpu-busy proved unreliable (often unset), so we read
+# the authoritative GCS backend states — the same ones App.tsx polls and server.py checks.
+run_active() {
+  # Only the TPU lanes touch the warm TPU servers this prewarm POSTs to (esmfold-tpu and
+  # af2-tpu use east5a-0; boltz2-tpu uses east5a-3). GPU lanes (incl. the slow ~353s af2-gpu)
+  # never touch them, so they must NOT gate TPU prewarming — otherwise the "TPU Ready" badge
+  # waits on a GPU job for no reason. Gate on the TPU lanes only.
+  python3 - "$SHARED_BUCKET" <<'PY' 2>/dev/null
+import json, subprocess, sys
+bucket = sys.argv[1]
+ACTIVE = {"queued", "allocating", "loading", "inferring"}
+for b in ("esmfold-tpu","af2-tpu","boltz2-tpu"):
+    r = subprocess.run(["gsutil","-q","cat",f"{bucket}/job/{b}.json"], capture_output=True, text=True)
+    try:
+        if json.loads(r.stdout).get("state", "") in ACTIVE:
+            print(b); sys.exit(0)        # a real TPU run is in flight
+    except Exception:
+        pass
+sys.exit(1)                              # TPU lanes idle/done/failed
+PY
+}
+if A=$(run_active); then
+  echo "$(date) prewarm SKIP: real run active ($A) — not POSTing to warm servers"
+  exit 0
+fi
 
 # Do NOT delete the sentinel here. The sentinel's mtime is the SOLE truth
 # source for "last time all 12 shapes were touched". If we deleted it at
@@ -83,6 +114,12 @@ for P in "${PROTEINS[@]}"; do
 done
 
 echo ""
+# Re-check before hitting the Boltz-2 server: a real run may have started during the ESM warm.
+if A=$(run_active); then
+  echo "$(date) prewarm: real run active ($A) after ESM — skipping Boltz-2 warm to avoid collision"
+  touch "$SENTINEL"
+  exit 0
+fi
 echo "===== Pre-warming Boltz-2 ($BOLTZ_URL) ====="
 # Use Python for the Boltz-2 calls — bash heredoc/escaping inside docker exec
 # inside ssh inside gcloud chains is unreliable for embedded newlines.

@@ -414,45 +414,31 @@ sudo chmod +x /opt/tpu-server-health.sh /opt/tpu-keep-warm.sh
 
 ### Boltz-2 TPU VM (dedicated warm server)
 
-```bash
-# 1. Persist VFIO modules across reboot
-sudo tee /etc/modules-load.d/vfio.conf > /dev/null <<EOF
-vfio
-vfio_iommu_type1
-vfio_pci
-EOF
-sudo tee /etc/modprobe.d/vfio.conf > /dev/null <<EOF
-options vfio_iommu_type1 allow_unsafe_interrupts=1
-EOF
+> **The QR for this node MUST use `runtime-version=v2-alpha-tpuv6e`.** As of 2026-06 the
+> generic `tpu-ubuntu2204-base` image provisions a v6e with **no TPU access daemon**
+> (`VBARCONTROL_AGENT_DOCKER_URL=""`, only a `fake_tensorflow` placeholder), and libtpu 0.0.21
+> then fails with `No hardware is found` / `Failed to get global TPU topology`. `v2-alpha-tpuv6e`
+> ships the `vbarcontrolagent` and binds the chips to `vfio-pci` at boot — the access path libtpu
+> needs. (Pre-2026-06 nodes happened to get a vbar-equipped base image; that is no longer the case.)
 
-# 2. Make vbarcontrolagent + boltz2-server containers auto-restart
-sudo docker update --restart=always vbarcontrolagent
-sudo docker run -d --name boltz2-server --privileged --net=host --restart=always \
-  --ulimit memlock=-1:-1 --shm-size=4g --hostname=<BOLTZ2_TPU_VM_NAME> \
-  $AR_REGION-docker.pkg.dev/$BURST_PROJECT_ID/$AR_REPO/slurm-tpu:latest \
-  sleep infinity
-
-# 3. Deploy Boltz-2 server + start as slurmuser
-sudo docker exec boltz2-server bash -c '
-  gsutil -q cp '$SHARED_BUCKET'/backends/tpu-boltz2-server.py /opt/backends/tpu-boltz2-server.py
-  gsutil -q cp '$SHARED_BUCKET'/backends/boltz2-tpu/predict.py /opt/backends/boltz2-tpu/predict.py
-  mkdir -p /tmp/numba_cache && chmod 777 /tmp/numba_cache
-'
-sudo docker exec -d -u 1015145168 boltz2-server bash -c '
-  cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface \
-    BOLTZ_CACHE=/tmp/.boltz NUMBA_CACHE_DIR=/tmp/numba_cache \
-    python3 tpu-boltz2-server.py > /tmp/tpu-boltz2-server.log 2>&1 \
-    & echo $! > /tmp/tpu-boltz2-server.pid
-'
-```
-
-Grab the Boltz-2 VM's internal IP and update `BOLTZ_HOST` in `scripts/env.sh` (or export it before deploys):
+The whole node-side deploy is one idempotent script — it binds vfio (skipped if the runtime
+already did it), ensures `vbarcontrolagent`, creates the `boltz2-server` container, restores the
+weight cache from `gs://…/boltz-cache/`, and launches the warm server on `:8091`:
 
 ```bash
-export BOLTZ_HOST=$(gcloud alpha compute tpus tpu-vm describe <BOLTZ2_TPU_VM_NAME> \
-  --project=$BURST_PROJECT_ID --zone=us-east5-a \
-  --format='value(networkEndpoints[0].ipAddress)')
+# create the QR with the correct runtime, then deploy:
+gcloud compute tpus queued-resources create demo-tpu-flex-east5a \
+  --node-id=<BOLTZ2_TPU_VM_NAME> --zone=us-east5-a --project=$BURST_PROJECT_ID \
+  --accelerator-type=v6e-4 --runtime-version=v2-alpha-tpuv6e --network=default
+
+cat scripts/boltz2_node_setup.sh | \
+  ssh -i ~/.ssh/google_compute_engine <user>@<BOLTZ2_EXTERNAL_IP> 'sudo bash -s'
 ```
+
+`BOLTZ_HOST` (the node's internal IP) is published to `gs://…/config/boltz_host` and read by
+`env.sh`, so clients pick up the current IP automatically across recreates. To recover after a
+host reboot de-initializes the chips (see Troubleshooting), run `scripts/recreate_boltz2_tpu.sh`,
+which does the delete+recreate (with `v2-alpha-tpuv6e`) + redeploy + IP-republish in one shot.
 
 ### GPU VMs
 
@@ -669,7 +655,7 @@ $SHARED_BUCKET/
 |----|------|--------------|
 | ESMFold TPU VM | `*/5 * * * *` (`tpu-server-health.sh`) | HTTP probe `localhost:8090`. If dead → restart as `slurmuser` + fire `prewarm_all_proteins.sh`. If sentinel `<10min` → badge `ready`, else `loading`. Cleans disk at >75%, docker prune at >80%. |
 | ESMFold TPU VM | `*/8 * * * *` (`tpu-keep-warm.sh`) | Re-fires the demo protein shape on both servers via `prewarm_all_proteins.sh`. Skips if `/tmp/tpu-busy` (a Slurm job is in flight) or if `/tmp/tpu-prewarm.pid` is alive. |
-| Boltz-2 TPU VM | n/a | `boltz2-server` and `vbarcontrolagent` containers use `--restart=always`. VFIO modules persist via `/etc/modules-load.d/vfio.conf`. |
+| Boltz-2 TPU VM | `*/5 * * * *` + `@reboot` (`tpu-boltz2-health.sh`) | HTTP probe `localhost:8091`. If down → re-run the idempotent `boltz2_node_setup.sh` (fetched from GCS): ensures the `vbarcontrolagent` + vfio binding (already done by the `v2-alpha-tpuv6e` runtime at boot), the `boltz2-server` container, the weight cache (`/tmp/.boltz/boltz2_conf.ckpt`, restored from `gs://…/boltz-cache/` since `/tmp` is wiped on restart), and a fresh server launch as `slurmuser`. If the server still fails with **"Failed to get global TPU topology"** the chips were de-initialized by a host reboot — NOT fixable on-node; the cron logs "run `recreate_boltz2_tpu.sh`" (QR recreate). |
 | GPU VMs | `*/10 * * * *` (`gpu-health.sh`) | Checks `torch.cuda.is_available()`, runs `gpu-node-setup.sh` if broken. Cleans disk at >85%. |
 | Controller VM | systemd `trigger-watcher.service`, `Restart=always` | Polls GCS for triggers, runs `predict.sh`. Single-instance enforced via `/tmp/watch_triggers.lock` (flock). |
 
@@ -686,11 +672,12 @@ Press Enter any number of times — the system picks up an existing run or start
 | Problem | Fix |
 |---------|-----|
 | Jobs fail ExitCode=1 | `docker exec slurmd tail -20 /tmp/{backend}.log` |
-| TPU "VFIO busy" | Stop tpu-runtime: `docker update --restart=no tpu-runtime; docker stop tpu-runtime` |
+| TPU "VFIO busy" (one process at a time holds `/dev/vfio`) | Kill stale holders in the container: `docker exec <c> bash -c 'pkill -9 python3; pkill -9 -f libtpu; rm -f /tmp/libtpu_lockfile'`, then relaunch. (`tpu-runtime` here is a harmless `fake_tensorflow` placeholder — it does NOT hold the TPU.) |
 | GPU "CUDA not found" | `docker exec slurmd ldconfig`; mount NVIDIA libs from host |
 | Disk full | `docker system prune -af` (each image ~12 GB) |
 | Badge stuck on `loading` | Sentinel >10 min — check `/tmp/tpu-keepwarm.log` for SKIP reasons; manually: `sudo /opt/tpu-keep-warm.sh` |
-| Boltz-2 server gone after reboot | Re-check `lsmod | grep vfio`, `/etc/modules-load.d/vfio.conf`, container `--restart=always` policies |
+| Boltz-2 server down (crash / lost `/tmp` weight cache) | Run `sudo /opt/tpu-boltz2-health.sh` on east5a-3 (the `*/5`+`@reboot` cron does this) — it re-runs `boltz2_node_setup.sh`, which re-fetches the weight cache from `gs://…/boltz-cache/` and relaunches the server. |
+| Boltz-2 `Failed to get global TPU topology` / `No hardware is found` | The host rebooted and de-initialized the v6e chips. **Unrecoverable on-node** (QR TPUs can't `stop`/`start`). Recover by recreating the queued resource: `bash scripts/recreate_boltz2_tpu.sh` (delete + recreate with **`runtime-version=v2-alpha-tpuv6e`** + redeploy + republish the new internal IP to `gs://…/config/boltz_host`). **Do NOT recreate with `tpu-ubuntu2204-base`** — as of 2026-06 that image ships no TPU access daemon (`VBARCONTROL_AGENT_DOCKER_URL=""`, `fake_tensorflow` only), so libtpu can never init. Optional off-node auto-heal: `boltz2_watchdog.sh` on the controller. |
 | Node "idle*" or "Not responding" | Restart slurmd: `docker exec slurmd bash -c 'slurmd --conf-server=<CONTROLLER_INTERNAL_IP>:6820 -N <name> &'` |
 | predict.sh double-run | `systemctl stop trigger-watcher` before manual runs |
 
