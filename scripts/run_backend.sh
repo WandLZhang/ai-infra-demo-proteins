@@ -129,7 +129,7 @@ if [[ "$SILICON" == "tpu" && "$BACKEND_ID" != "af2-tpu" ]]; then
   SERVER_HOST="localhost"
   SERVER_PORT=8090
   if [[ "$MODEL" == "boltz2" ]]; then
-    SERVER_HOST="${BOLTZ_HOST:-10.202.0.23}"
+    SERVER_HOST="${BOLTZ_HOST:-10.202.0.30}"
     SERVER_PORT="${BOLTZ_PORT:-8091}"
   fi
   HEALTH_URL="http://${SERVER_HOST}:${SERVER_PORT}/"
@@ -201,7 +201,7 @@ if [[ -f "$PREDICT_SCRIPT" ]]; then
     EXIT_CODE=$?
   elif [[ "$SILICON" == "tpu" ]]; then
     # Boltz-2 client talks to the warm server on east5a-3; ESMFold client talks to localhost
-    export BOLTZ_HOST="${BOLTZ_HOST:-10.202.0.23}"
+    export BOLTZ_HOST="${BOLTZ_HOST:-10.202.0.30}"
     export BOLTZ_PORT="${BOLTZ_PORT:-8091}"
     PJRT_DEVICE=TPU BOLTZ_HOST="$BOLTZ_HOST" BOLTZ_PORT="$BOLTZ_PORT" \
       python3 "$PREDICT_SCRIPT" "$FASTA_PATH" --out-dir "$RESULT_DIR" $EXTRA_ARGS 2>&1 | tee "/tmp/${BACKEND_ID}.log"

@@ -7,8 +7,9 @@
 #
 # Skipping rules:
 #   - Skip if another keep-warm or prewarm is already running (no double-run)
-#   - Skip if /tmp/tpu-busy exists and is fresh (< 10 min) — means a real
-#     Slurm job is currently using the TPU; don't compete
+#   - prewarm_all_proteins.sh self-gates on the AUTHORITATIVE run-state (GCS backend states)
+#     and refuses to POST to any warm server while a real run is in flight — so keep-warm
+#     never races / collides with a real job at the shared server.
 #
 # Install: */20 * * * * /opt/tpu-keep-warm.sh >> /tmp/tpu-keepwarm.log 2>&1
 # Reads /opt/env.sh if present for SHARED_BUCKET override.
@@ -17,7 +18,6 @@ set -uo pipefail
 [ -r /opt/env.sh ] && source /opt/env.sh
 CONTAINER="${CONTAINER:-slurmd}"
 SHARED_BUCKET="${SHARED_BUCKET:-gs://wz-nih-demo-shared}"
-BUSY_FILE_MAX_AGE=600   # seconds — if /tmp/tpu-busy is newer than this, skip
 
 # Skip only if a real prewarm.pid exists AND that pid is alive in the container.
 # (Using pgrep here self-matched the keep-warm's own bash -c argv and silently
@@ -28,12 +28,12 @@ if [ -n "$PREWARM_PID" ] && docker exec $CONTAINER kill -0 "$PREWARM_PID" 2>/dev
   exit 0
 fi
 
-# Skip if a real Slurm job is using the TPU right now.
-BUSY_AGE=$(docker exec $CONTAINER bash -c 'if [ -f /tmp/tpu-busy ]; then echo $(( $(date +%s) - $(stat -c %Y /tmp/tpu-busy) )); else echo 99999; fi' 2>/dev/null || echo 99999)
-if [ "$BUSY_AGE" -lt "$BUSY_FILE_MAX_AGE" ]; then
-  echo "$(date) keep-warm SKIP: TPU busy (busy file age=${BUSY_AGE}s)"
-  exit 0
-fi
+# Collision-avoidance is now enforced inside prewarm_all_proteins.sh via an AUTHORITATIVE
+# run-state gate (it reads the GCS backend states — the same ones App.tsx polls and Cloud
+# Run's server.py checks — and refuses to POST to any warm server while a real run is in
+# flight). The old /tmp/tpu-busy flag was unreliable (often never set, so it never tripped),
+# which let keep-warm race real jobs at the shared server. prewarm self-gates now, so we no
+# longer rely on the busy file here.
 
 # Require server alive — otherwise the health cron will restart it and fire prewarm itself.
 if ! curl -sf -m 5 http://localhost:8090/ > /dev/null 2>&1; then
