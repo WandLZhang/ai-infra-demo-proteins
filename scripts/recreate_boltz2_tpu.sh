@@ -69,18 +69,6 @@ echo "$(ts) [6/6] publishing new BOLTZ_HOST=$IP to GCS (clients pick it up via e
 printf '%s' "$IP" | gsutil -q cp - "$SHARED_BUCKET/config/boltz_host"
 echo "  config/boltz_host = $(gsutil -q cat "$SHARED_BUCKET/config/boltz_host")"
 
-# The trigger-watcher on the controller is long-running: it sourced env.sh once at start and
-# pinned the OLD BOLTZ_HOST in its environment, which it then passes to every Slurm job. Pull
-# the fresh env.sh onto the controller and restart the watcher so new jobs get the new IP.
-CTRL_PROJECT="${CONTROLLER_PROJECT_ID:-wz-nih-demo-controller}"
-CTRL_VM="${CONTROLLER_VM_NAME:-biowulf-controller}"
-CTRL_ZONE="${CONTROLLER_VM_ZONE:-us-east5-a}"
-echo "$(ts) refreshing env.sh + restarting trigger-watcher on $CTRL_VM"
-gcloud compute ssh "$CTRL_VM" --project="$CTRL_PROJECT" --zone="$CTRL_ZONE" --tunnel-through-iap --command="
-  sudo gsutil -q cp $SHARED_BUCKET/scripts/env.sh /opt/protein-demo/env.sh
-  sudo systemctl restart trigger-watcher 2>/dev/null || true
-" 2>&1 | grep -viE "warning|tcp_upload|numpy|instructions" | tail -3
-
 echo "$(ts) verify :8091"
 if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
      "$SSH_USER@$EXT" "curl -sf -m5 http://localhost:8091/ >/dev/null" 2>/dev/null; then
