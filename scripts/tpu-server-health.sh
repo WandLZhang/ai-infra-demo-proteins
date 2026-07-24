@@ -43,6 +43,17 @@ fi
 
 # ── 3. Fix slurmuser scratch perms (cheap, always safe) ──────────
 docker exec $CONTAINER bash -c 'chmod -R 777 /tmp/.gsutil /tmp/.config /tmp/protein-demo /tmp/numba_cache 2>/dev/null; chmod 666 /tmp/*.log /tmp/*.fasta /tmp/*.pdb /tmp/tpu-model-server.pid 2>/dev/null; mkdir -p /tmp/numba_cache && chmod 777 /tmp/numba_cache' 2>/dev/null
+# Post-reboot /root resets to 700 — slurmuser then can't traverse it to read the
+# HF weight cache and the server relaunch below fails. Reopen traversal + read.
+docker exec $CONTAINER bash -c 'chmod o+x /root /root/.cache 2>/dev/null; chmod -R a+rX /root/.cache/huggingface 2>/dev/null' 2>/dev/null
+
+# ── 3b. Rebuild af2-tpu's isolated jax-venv if a /tmp wipe (reboot) removed it.
+# Non-blocking (background) + lock-guarded so */5 ticks don't stack rebuilds.
+if ! docker exec $CONTAINER test -x /tmp/jax-venv/bin/python3 2>/dev/null && [ ! -f /tmp/jax-venv-rebuild.lock ]; then
+  echo "$(date) jax-venv missing (reboot wiped /tmp) — rebuilding in background"
+  touch /tmp/jax-venv-rebuild.lock
+  ( docker exec $CONTAINER bash -c 'python3 -m venv --system-site-packages /tmp/jax-venv && /tmp/jax-venv/bin/pip install --no-cache-dir "jax[tpu]==0.4.38" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && chmod -R a+rX /tmp/jax-venv' > /tmp/jax-venv-rebuild.log 2>&1; rm -f /tmp/jax-venv-rebuild.lock ) &
+fi
 
 # ── 4. ESMFold server alive AND prewarm sentinel fresh? ──────────
 # Frontend badge contract — "ready" means brca1's shape is currently HOT
@@ -82,7 +93,7 @@ echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
 docker exec $CONTAINER bash -c 'rm -f /tmp/libtpu_lockfile /tmp/tpu-model-server.pid /tmp/tpu-prewarm-done' 2>/dev/null
 sleep 2
 
-docker exec -d -u "$SLURMUSER_UID" $CONTAINER bash -c 'cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz NUMBA_CACHE_DIR=/tmp/numba_cache python3 -u tpu-esmfold-server.py > /tmp/tpu-model-server.log 2>&1 & echo $! > /tmp/tpu-model-server.pid'
+docker exec -d -u "$SLURMUSER_UID" $CONTAINER bash -c 'cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 BOLTZ_CACHE=/tmp/.boltz NUMBA_CACHE_DIR=/tmp/numba_cache python3 -u tpu-esmfold-server.py > /tmp/tpu-model-server.log 2>&1 & echo $! > /tmp/tpu-model-server.pid'
 
 # ── 6. Wait for HTTP listener (~60s for weight load) ─────────────
 echo "$(date) waiting for ESMFold to start listening..."
