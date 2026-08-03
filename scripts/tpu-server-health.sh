@@ -25,6 +25,15 @@ if [[ -n "${DISK_PCT:-}" && "$DISK_PCT" -gt 75 ]]; then
   echo "$(date) disk at ${DISK_PCT}%, cleaning..."
   docker exec $CONTAINER bash -c 'rm -rf /tmp/b2w_out* /tmp/boltz_warm* /tmp/boltz2_server_out* /tmp/result-* /tmp/esmfold_warm* /tmp/precheck.pdb /root/.cache/pip 2>/dev/null; find /tmp -maxdepth 2 -name "*.fasta" -mtime +1 -delete 2>/dev/null; find /tmp -maxdepth 2 -name "*.log" -mtime +1 -delete 2>/dev/null' 2>/dev/null
   journalctl --vacuum-size=20M 2>/dev/null
+  # /var/log is the real filler on TPU VMs: rsyslog + the TPU health agent can push
+  # syslog/kern.log into the tens of GB (2026-08-02: syslog.1 + kern.log.1 were 34 GB
+  # EACH and wedged the node at 100% — docker exec then fails with "no space left on
+  # device", which kills the warm server AND every Slurm job that lands here).
+  # journalctl --vacuum does NOT touch these; drop rotated copies + cap the live ones.
+  rm -f /var/log/*.gz /var/log/*.[1-9] /var/log/*.old 2>/dev/null
+  for f in /var/log/syslog /var/log/kern.log /var/log/messages /var/log/daemon.log; do
+    [ -f "$f" ] && [ "$(stat -c %s "$f" 2>/dev/null || echo 0)" -gt 1073741824 ] && truncate -s 0 "$f" 2>/dev/null
+  done
   echo "$(date) disk now at $(df / --output=pcent | tail -1 | tr -d ' %')%"
 fi
 
