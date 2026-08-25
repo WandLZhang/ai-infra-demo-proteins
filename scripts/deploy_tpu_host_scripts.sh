@@ -43,6 +43,7 @@ echo "=== Pushing host scripts to $TPU_VM:/opt/ ==="
 gcloud compute tpus tpu-vm scp \
   "$SCRIPT_DIR/tpu-server-health.sh" \
   "$SCRIPT_DIR/tpu-keep-warm.sh" \
+  "$SCRIPT_DIR/timing_test.py" \
   "$TPU_VM:/tmp/" \
   --zone="$TPU_ZONE" --project="$BURST_PROJECT_ID" 2>&1 | grep -v "To increase"
 
