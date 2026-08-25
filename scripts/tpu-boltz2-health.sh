@@ -51,10 +51,36 @@ if [[ -n "${DISK_PCT:-}" && "$DISK_PCT" -gt 75 ]]; then
   echo "$(ts) disk now at $(df / --output=pcent | tail -1 | tr -d ' %')%"
 fi
 
-# ── 0b. A full disk kills dockerd outright; restart it before probing the server. ──
+# ── 0b. A full disk kills host services outright. On 2026-08-25 it took down BOTH dockerd
+#       and systemd-resolved. The second one is the nastier failure: /etc/resolv.conf is a
+#       symlink to systemd-resolved's stub, so when resolved dies the node loses all DNS,
+#       gsutil hangs, and this script can no longer fetch boltz2_node_setup.sh — recovery
+#       cripples itself exactly when it is needed. Restore both before probing the server.
 if ! systemctl is-active --quiet docker; then
   echo "$(ts) docker daemon is $(systemctl is-active docker) — restarting"
   systemctl restart docker 2>/dev/null; sleep 8
+fi
+if ! getent hosts storage.googleapis.com >/dev/null 2>&1; then
+  echo "$(ts) DNS is broken (cannot resolve storage.googleapis.com) — repairing"
+  systemctl restart systemd-resolved 2>/dev/null; sleep 3
+  # The stub listener on 127.0.0.53 can stay dead even when the unit reports active, so
+  # fall back to the GCP metadata resolver directly rather than trusting the symlink.
+  if ! getent hosts storage.googleapis.com >/dev/null 2>&1; then
+    rm -f /etc/resolv.conf
+    printf "nameserver 169.254.169.254\nsearch google.internal\noptions timeout:2 attempts:2\n" > /etc/resolv.conf
+    echo "$(ts) pointed /etc/resolv.conf at 169.254.169.254 directly"
+  fi
+fi
+# Docker snapshots the host's /etc/resolv.conf into a container at creation time, so a
+# container created while host DNS was broken keeps a nameserver-less resolv.conf forever —
+# even after the host is repaired. Boltz needs api.colabfold.com for MSA, and without DNS
+# the fold returns an empty CIF with no error, which the client reads as "server not
+# available" and then falls back to local inference and dies on VFIO-busy. Repair in place.
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER}$"; then
+  if ! docker exec "$CONTAINER" getent hosts api.colabfold.com >/dev/null 2>&1; then
+    echo "$(ts) container DNS is broken — repairing $CONTAINER:/etc/resolv.conf"
+    docker exec "$CONTAINER" bash -c 'printf "nameserver 169.254.169.254\nsearch google.internal\noptions timeout:2 attempts:2\n" > /etc/resolv.conf' 2>/dev/null
+  fi
 fi
 
 # ── 0. If the server already answers, do nothing. Never disturb a working server. ──
