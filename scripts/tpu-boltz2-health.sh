@@ -9,7 +9,7 @@
 # What it CANNOT fix: a host-maintenance reboot de-initializes the v6e chips at the hardware
 # level, after which libtpu reports "Failed to get global TPU topology" / "No hardware is
 # found". QR-backed TPUs can't stop/start, so the only fix is delete+recreate of the queued
-# resource (recreate_boltz2_tpu.sh, run OFF the node). We detect that case and flag it loudly
+# resource (recreate_tpu_node.sh, run OFF the node). We detect that case and flag it loudly
 # rather than thrashing — a 5-minute cron must never autonomously delete/recreate scarce TPUs.
 #
 # Install on the host:
@@ -103,7 +103,7 @@ if docker exec "$CONTAINER" tail -40 /tmp/tpu-boltz2-server.log 2>/dev/null \
      | grep -qiE "Failed to get global TPU topology|No hardware is found"; then
   echo "$(ts) *** TPU DEAD (topology / no hardware) — the host likely rebooted and de-initialized"
   echo "$(ts) *** the v6e chips. This is NOT fixable on-node. Run OFF-node, from the repo:"
-  echo "$(ts) ***     bash scripts/recreate_boltz2_tpu.sh"
+  echo "$(ts) ***     bash scripts/recreate_tpu_node.sh boltz"
   echo "$(ts) *** (delete+recreate the QR with v2-alpha-tpuv6e; QR TPUs cannot stop/start)."
 else
   echo "$(ts) server still down (non-topology). Last server log lines:"

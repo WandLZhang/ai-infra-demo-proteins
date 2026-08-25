@@ -14,7 +14,7 @@
 #      outage cause. Dropping them removes that whole failure mode.
 #   4. Deploy the server code from GCS and (re)launch it as slurmuser.
 #
-# Used by manual deploy AND by recreate_boltz2_tpu.sh after a QR recreate.
+# Used by manual deploy AND by recreate_tpu_node.sh after a QR recreate.
 #
 # CRITICAL: the node MUST be provisioned with runtime-version=v2-alpha-tpuv6e. As of
 # 2026-06, the generic tpu-ubuntu2204-base image ships NO TPU access daemon
@@ -22,7 +22,7 @@
 # reports "No hardware is found" / "Failed to get global TPU topology" and the warm
 # server can never start. v2-alpha-tpuv6e ships the vbar control agent + binds the
 # chips to vfio-pci at boot, which is the access path this libtpu (0.0.21) needs.
-# See recreate_boltz2_tpu.sh and the README troubleshooting section.
+# See recreate_tpu_node.sh and the README troubleshooting section.
 #
 # Config comes from /opt/env.sh if present, else the defaults below (which match
 # scripts/env.sh). Run: sudo bash boltz2_node_setup.sh

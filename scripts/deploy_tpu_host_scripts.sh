@@ -27,14 +27,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
-# east5a-0 = ESMFold VM (drives the badge); east5a-3 = dedicated Boltz-2 VM.
-TPU_VM="${TPU_VM:-nihprotein-tpuv6eeast5a-0}"
-TPU_ZONE="${TPU_ZONE:-us-east5-a}"
+# ESMFold VM (drives the badge) + dedicated Boltz-2 VM.
+#
+# ⚠️ The ESMFold host's TPU node id is NOT its Slurm node name. The original
+# nihprotein-tpuv6eeast5a-0 was lost to a preemption in 2026-07 and us-east5-a had no v6e
+# capacity to rebuild it, so the replacement was provisioned in us-east5-b as nih-v6e-e5b
+# and registers with slurmctld under the OLD east5a-0 name (keepalive.sh pins its NodeAddr).
+# gcloud needs the real node id and zone; Slurm needs the registered name. Keep them apart.
+TPU_VM="${TPU_VM:-nih-v6e-e5b}"
+TPU_ZONE="${TPU_ZONE:-us-east5-b}"
+TPU_SLURM_NODE="${TPU_ESMFOLD_NODE:-nihprotein-tpuv6eeast5a-0}"
 BOLTZ_TPU_VM="${BOLTZ_TPU_VM:-nihprotein-tpuv6eeast5a-3}"
 BOLTZ_TPU_ZONE="${BOLTZ_TPU_ZONE:-us-east5-a}"
 
 echo "=== Uploading prewarm + boltz2 deploy/health scripts + env to GCS ==="
-for f in prewarm_all_proteins.sh tpu-boltz2-health.sh boltz2_node_setup.sh recreate_boltz2_tpu.sh env.sh; do
+for f in prewarm_all_proteins.sh tpu-boltz2-health.sh boltz2_node_setup.sh recreate_tpu_node.sh env.sh; do
   gsutil -q cp "$SCRIPT_DIR/$f" "$SHARED_BUCKET/scripts/$f" && echo "  ok: $SHARED_BUCKET/scripts/$f"
 done
 
@@ -67,7 +74,7 @@ gcloud compute tpus tpu-vm ssh "$TPU_VM" --zone="$TPU_ZONE" --project="$BURST_PR
 echo ""
 echo "=== Staging Boltz-2 host scripts on $BOLTZ_TPU_VM:/opt/ + installing cron ==="
 echo "    (the node must be provisioned with runtime-version=v2-alpha-tpuv6e — see"
-echo "     recreate_boltz2_tpu.sh; tpu-ubuntu2204-base no longer ships the TPU access daemon.)"
+echo "     recreate_tpu_node.sh; tpu-ubuntu2204-base no longer ships the TPU access daemon.)"
 gcloud compute tpus tpu-vm ssh "$BOLTZ_TPU_VM" --zone="$BOLTZ_TPU_ZONE" --project="$BURST_PROJECT_ID" --command='
   sudo gsutil -q cp '"$SHARED_BUCKET"'/scripts/env.sh /opt/env.sh
   sudo gsutil -q cp '"$SHARED_BUCKET"'/scripts/tpu-boltz2-health.sh /opt/tpu-boltz2-health.sh
@@ -113,4 +120,4 @@ echo "=== Done ==="
 echo "east5a-0 cron: */5 health, */8 keep-warm."
 echo "east5a-3 cron: */5 boltz2-health + @reboot. Recoverable failures (server crash, lost"
 echo "  /tmp weight cache) -> re-runs boltz2_node_setup.sh. Dead chip after host reboot"
-echo "  (topology error) -> flags 'run recreate_boltz2_tpu.sh' (QR recreate; can't be fixed on-node)."
+echo "  (topology error) -> flags 'run recreate_tpu_node.sh' (QR recreate; can't be fixed on-node)."
