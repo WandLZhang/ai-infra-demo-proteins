@@ -82,6 +82,32 @@ gcloud compute tpus tpu-vm ssh "$BOLTZ_TPU_VM" --zone="$BOLTZ_TPU_ZONE" --projec
 ' 2>&1 | grep -v "To increase"
 
 echo ""
+echo "=== Capping rsyslog on both TPU VMs (idempotent) ==="
+# Both TPU hosts have filled their 97 GB disk with /var/log: east5a-0 on 2026-08-02 and
+# east5a-3 on 2026-08-25, each with syslog + kern.log around 33 GB apiece. At 100% the
+# docker daemon goes to `failed`, which takes the warm server, the container, and every
+# Slurm job on that host with it. The health crons now truncate /var/log above 75% disk;
+# this caps the files so it should not get that far. Applied here so a freshly provisioned
+# node inherits it, rather than being hand-patched after the fact.
+for VM_ZONE in "$TPU_VM:$TPU_ZONE" "$BOLTZ_TPU_VM:$BOLTZ_TPU_ZONE"; do
+  VM="${VM_ZONE%%:*}"; VMZ="${VM_ZONE##*:}"
+  gcloud compute tpus tpu-vm ssh "$VM" --zone="$VMZ" --project="$BURST_PROJECT_ID" --command='
+    if [ -f /etc/logrotate.d/rsyslog ] && ! grep -q maxsize /etc/logrotate.d/rsyslog; then
+      sudo sed -i "s/^\(\s*\)\(weekly\|daily\)/\1\2\n\1maxsize 200M/" /etc/logrotate.d/rsyslog
+      echo "  '"$VM"': maxsize 200M added"
+    else
+      echo "  '"$VM"': already capped"
+    fi
+    # logrotate only enforces maxsize when it runs, and the default timer is daily — which
+    # a runaway can outpace. Hourly keeps the ceiling meaningful.
+    sudo mkdir -p /etc/systemd/system/logrotate.timer.d
+    printf "[Timer]\nOnCalendar=\nOnCalendar=hourly\n" | sudo tee /etc/systemd/system/logrotate.timer.d/hourly.conf >/dev/null
+    sudo systemctl daemon-reload 2>/dev/null && sudo systemctl restart logrotate.timer 2>/dev/null
+    echo "  '"$VM"': logrotate timer -> $(systemctl show logrotate.timer -p TimersCalendar --value 2>/dev/null | head -c 40)"
+  ' 2>&1 | grep -v "To increase"
+done
+
+echo ""
 echo "=== Done ==="
 echo "east5a-0 cron: */5 health, */8 keep-warm."
 echo "east5a-3 cron: */5 boltz2-health + @reboot. Recoverable failures (server crash, lost"
