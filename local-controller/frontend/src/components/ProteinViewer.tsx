@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 
 // Public-read bucket — all fetches anonymous.
-const PDB_URL = 'https://storage.googleapis.com/wz-nih-demo-shared/job/af2-tpu.pdb'
-const PDB_METADATA_URL = 'https://storage.googleapis.com/storage/v1/b/wz-nih-demo-shared/o/job%2Faf2-tpu.pdb'
+// Points at esmfold-tpu, the FASTEST lane (~25s), not af2-tpu. af2-tpu is last in the
+// serialized TPU chain and lands ~175s after the first lane finishes, so pointing here
+// meant the viewer showed the PREVIOUS run's structure for the whole demo.
+const PDB_URL = 'https://storage.googleapis.com/wz-nih-demo-shared/job/esmfold-tpu.pdb'
+const PDB_METADATA_URL = 'https://storage.googleapis.com/storage/v1/b/wz-nih-demo-shared/o/job%2Fesmfold-tpu.pdb'
 
 // 30 seconds — picks up new AF2-TPU runs without user action, low load on GCS API.
 const POLL_INTERVAL_MS = 30_000
@@ -212,7 +215,7 @@ export default function ProteinViewer({ visible }: ProteinViewerProps) {
             </div>
             <div style={{ fontSize: 9, lineHeight: 1.5, maxWidth: 220 }}>
               {phase === 'init'
-                ? 'fetching last inference from gs://wz-nih-demo-shared/job/af2-tpu.pdb'
+                ? 'fetching last inference from gs://wz-nih-demo-shared/job/esmfold-tpu.pdb'
                 : 'no structure in GCS yet — render will appear within 30 s of upload'}
             </div>
           </div>
