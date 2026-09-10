@@ -92,22 +92,17 @@ export default function ProteinViewer({ visible }: ProteinViewerProps) {
         if (!v || cancelled) return
         v.clear()
         v.addModel(pdbText, 'pdb')
-        // Classic AlphaFold pLDDT coloring — pLDDT is stored in the PDB B-factor field.
-        //   >= 90  very high confidence  dark blue
-        //   70-90  high confidence       light blue
-        //   50-70  low confidence        yellow
-        //   <  50  very low confidence   orange
-        v.setStyle({}, {
-          cartoon: {
-            colorfunc: (atom: any) => {
-              const b = atom.b
-              if (b >= 90) return 0x0053D6
-              if (b >= 70) return 0x65CBF3
-              if (b >= 50) return 0xFFDB13
-              return 0xFF7D45
-            },
-          },
-        })
+        // Rainbow by residue position: N-terminus blue through C-terminus red.
+        //
+        // This replaced pLDDT confidence colouring. pLDDT lives in the PDB B-factor field, but the
+        // two models write it on different scales — AlphaFold 0-100, ESMFold 0-1 — and once the
+        // viewer was repointed at the faster ESMFold lane every structure rendered a flat orange:
+        // ESMFold's pLDDT on these demo sequences tops out near 55/100, which sits entirely in the
+        // "very low confidence" bucket. Spectrum shows the fold's topology instead and is
+        // multi-coloured for any model.
+        //
+        // NOTE: this no longer encodes confidence. Do not narrate it as AlphaFold pLDDT colouring.
+        v.setStyle({}, { cartoon: { color: 'spectrum' } })
         v.zoomTo()
         v.spin('y', 0.5)
         v.render()
