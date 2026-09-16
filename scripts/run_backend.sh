@@ -111,8 +111,9 @@ rm -f "$FASTA_PATH" "/tmp/${BACKEND_ID}.log" 2>/dev/null || true
 echo ">A|protein" > "$FASTA_PATH"
 echo "$SEQUENCE" >> "$FASTA_PATH"
 
-# AF2-TPU runs on a SEPARATE TPU VM (east5b) — no VFIO conflict with model server.
-# ESMFold-TPU and Boltz2-TPU run on east5a where the model server stays warm.
+# ESMFold-TPU and AF2-TPU both run on this VM. Boltz2-TPU runs on the east5a-3 v6e.
+# Only one process owns /dev/vfio, so AF2-TPU kills the local ESMFold server to take
+# the chip and restarts it afterward. See vfio_release and server_restart below.
 
 # ── Phase 1: Allocating ─────────────────────────────────────────────
 log_event "allocate" "allocating on $VM_NAME ($SILICON)"

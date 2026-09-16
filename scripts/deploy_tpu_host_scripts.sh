@@ -40,8 +40,11 @@ TPU_SLURM_NODE="${TPU_ESMFOLD_NODE:-nihprotein-tpuv6eeast5a-0}"
 BOLTZ_TPU_VM="${BOLTZ_TPU_VM:-nihprotein-tpuv6eeast5a-3}"
 BOLTZ_TPU_ZONE="${BOLTZ_TPU_ZONE:-us-east5-a}"
 
-echo "=== Uploading prewarm + boltz2 deploy/health scripts + env to GCS ==="
-for f in prewarm_all_proteins.sh tpu-boltz2-health.sh boltz2_node_setup.sh recreate_tpu_node.sh env.sh; do
+# run_backend.sh belongs in this list: predict.sh fetches it from GCS at job time
+# (see predict.sh, the gsutil cp into /tmp/protein-demo), so a repo edit that never
+# reaches the bucket never reaches a compute node.
+echo "=== Uploading backend + prewarm + boltz2 deploy/health scripts + env to GCS ==="
+for f in run_backend.sh prewarm_all_proteins.sh tpu-boltz2-health.sh boltz2_node_setup.sh recreate_tpu_node.sh env.sh; do
   gsutil -q cp "$SCRIPT_DIR/$f" "$SHARED_BUCKET/scripts/$f" && echo "  ok: $SHARED_BUCKET/scripts/$f"
 done
 

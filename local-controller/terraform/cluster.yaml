@@ -1,13 +1,27 @@
 # Protein demo Cluster Toolkit blueprint.
 # Extends the slurm-multi-region-gpu pattern with TPU v6e + GPU A100 nodesets.
 #
+# ---------------------------------------------------------------------------
+# DO NOT APPLY. This blueprint does not describe the running cluster.
+#
+# The live cluster runs on hand-written nodeset and partition configs in
+# gs://slurm-nihprotein6e309/ and on hand-made instance templates. The
+# templates this blueprint built are orphaned. An apply today would overwrite
+# that config bucket, delete the spot-tpu and spot-gpu partitions predict.sh
+# submits to, and drop SuspendExcNodes so the warm servers get powered down.
+# The terraform state tracks no live instances, so it would also collide with
+# everything that already exists.
+#
+# Kept as a record of the original topology. Reconcile before any apply.
+# ---------------------------------------------------------------------------
+#
 # Two partitions:
-#   tpu  — TPU v6e Spot across 7 CONUS zones (Weight 1-7)
-#   gpu  — GPU A100/H100 Spot across CONUS zones (Weight 1-6)
+#   tpu  — TPU v6e Spot nodesets
+#   gpu  — GPU A100 Spot nodesets
 #
 # Researcher submits:
-#   sbatch -p tpu predict.sh --model=af2
-#   sbatch -p gpu predict.sh --model=af2
+#   sbatch -p tpu predict.sh
+#   sbatch -p gpu predict.sh
 #   (or frontend "Submit All" fires both)
 #
 # Slurm tries nodesets in Weight order, auto-provisions Spot in whichever
@@ -71,10 +85,10 @@ deployment_groups:
   modules:
 
   # ===================================================================
-  # TPU v6e Spot nodesets — ordered by Spot capacity (internal source)
+  # TPU v6e Spot nodesets — ordered by observed Spot availability
   # ===================================================================
 
-  # TPU v6e Spot — us-west1-c (REDACTED Spot capacity — largest pool)
+  # TPU v6e Spot — us-west1-c
   - id: tpu_v6e_west1c
     source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
     use: [default_vpc_west1]
@@ -96,7 +110,7 @@ deployment_groups:
         enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 1 }
 
-  # TPU v6e Spot — us-east5-b (REDACTED capacity)
+  # TPU v6e Spot — us-east5-b
   - id: tpu_v6e_east5b
     source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
     use: [default_vpc_east5]
@@ -118,7 +132,7 @@ deployment_groups:
         enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 2 }
 
-  # TPU v6e Spot — us-east5-a (REDACTED capacity)
+  # TPU v6e Spot — us-east5-a
   - id: tpu_v6e_east5a
     source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
     use: [default_vpc_east5]
@@ -140,7 +154,7 @@ deployment_groups:
         enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 3 }
 
-  # TPU v6e Spot — us-central1-b (REDACTED capacity)
+  # TPU v6e Spot — us-central1-b
   - id: tpu_v6e_central1b
     source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
     use: [default_vpc_central1]
@@ -162,7 +176,7 @@ deployment_groups:
         enable_integrity_monitoring: true
       node_conf: { Feature: tpu-v6e, Weight: 4 }
 
-  # TPU v6e Spot — us-east1-d (REDACTED capacity)
+  # TPU v6e Spot — us-east1-d
   - id: tpu_v6e_east1d
     source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
     use: [default_vpc_east1]
@@ -188,7 +202,7 @@ deployment_groups:
   # GPU A100 Spot nodesets — for AF2-GPU, ESMFold-GPU, Boltz-2-GPU
   # ===================================================================
 
-  # A100 80GB (A2-ultra) — us-central1 (largest A2-ultra pool: REDACTED cap)
+  # A100 80GB (A2-ultra) — us-central1
   - id: a100_spot_central1
     source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
     use: [default_vpc_central1]
@@ -231,11 +245,11 @@ deployment_groups:
   - id: tpu_partition
     source: community/modules/compute/schedmd-slurm-gcp-v6-partition
     use:
-    - tpu_v6e_west1c       # W1 — REDACTED Spot capacity
-    - tpu_v6e_east5b       # W2 — REDACTED
-    - tpu_v6e_east5a       # W3 — REDACTED
-    - tpu_v6e_central1b    # W4 — REDACTED
-    - tpu_v6e_east1d       # W5 — REDACTED
+    - tpu_v6e_west1c       # W1
+    - tpu_v6e_east5b       # W2
+    - tpu_v6e_east5a       # W3
+    - tpu_v6e_central1b    # W4
+    - tpu_v6e_east1d       # W5
     settings:
       partition_name: tpu
       exclusive: false
