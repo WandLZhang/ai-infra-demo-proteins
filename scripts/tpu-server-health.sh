@@ -88,22 +88,40 @@ if curl -sf -m 5 http://localhost:8090/ > /dev/null 2>&1; then
   exit 0
 fi
 
-# HTTP didn't answer. A server process younger than 10 minutes is still loading weights: eager
-# mode answers within about 70 s of starting. Older than that and still silent means it's wedged,
-# so kill it and fall through to the restart block. Before this check had an age limit, a wedged
-# server after the Sept 24 reboot reported "loading" every 5 minutes for two days and the
-# esmfold-tpu lane failed with "model server not ready".
+# HTTP didn't answer. Three cases.
 #
-# The [t] bracket keeps pgrep and pkill from matching the `bash -c` that runs them. The old
-# `pgrep -f tpu-esmfold-server` could match its own parent shell and always report a live server.
-SERVER_AGE=$(docker exec $CONTAINER bash -c 'for p in $(pgrep -f "[t]pu-esmfold-server"); do ps -o etimes= -p $p; done | sort -n | tail -1' 2>/dev/null | tr -d ' ')
+# 1. An af2-tpu job is running. It kills this server on purpose to take the TPU (VFIO is
+#    single-tenant) and restarts it when it finishes, so leave the chip alone: a restart here
+#    would either steal the TPU from the running job or die on a busy device. Matching
+#    run_backend.sh rather than predict.py also covers the job's 8 s gap before JAX opens the
+#    device and its own restart of the server afterward.
+if docker exec $CONTAINER bash -c 'pgrep -f "[r]un_backend.sh af2-tpu" > /dev/null' 2>/dev/null; then
+  echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
+  exit 0
+fi
+
+# 2. The youngest server process is under 10 minutes old: it's still loading weights. Eager mode
+#    answers within about 70 s of starting.
+# 3. It's older than that and also fails a second, longer probe: it's wedged. Kill it and fall
+#    through to the restart block. Before this check had an age limit, a dead server after the
+#    Sept 24 reboot reported "loading" every 5 minutes for two days.
+#
+# The pattern is the server's own command line, so an editor or `tail` on the file doesn't count.
+# The [p] bracket keeps pgrep and pkill from matching the `bash -c` that runs them; the old
+# `pgrep -f tpu-esmfold-server` matched its own parent shell and always reported a live server.
+SERVER_MATCH='[p]ython3 -u tpu-esmfold-server.py'
+SERVER_AGE=$(docker exec $CONTAINER bash -c "for p in \$(pgrep -f '$SERVER_MATCH'); do ps -o etimes= -p \$p; done | sort -n | head -1" 2>/dev/null | tr -d ' ')
 if [ -n "$SERVER_AGE" ] && [ "$SERVER_AGE" -lt 600 ]; then
   echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
   exit 0
 fi
 if [ -n "$SERVER_AGE" ]; then
-  echo "$(date) ESMFold server up ${SERVER_AGE}s without answering HTTP, treating it as wedged"
-  docker exec $CONTAINER bash -c 'pkill -9 -f "[t]pu-esmfold-server"' 2>/dev/null
+  if curl -sf -m 20 http://localhost:8090/ > /dev/null 2>&1; then
+    echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
+    exit 0
+  fi
+  echo "$(date) ESMFold server up ${SERVER_AGE}s and silent on two probes, treating it as wedged"
+  docker exec $CONTAINER bash -c "pkill -9 -f '$SERVER_MATCH'" 2>/dev/null
   sleep 3
 fi
 

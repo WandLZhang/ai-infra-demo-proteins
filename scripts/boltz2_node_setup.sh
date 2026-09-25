@@ -108,7 +108,11 @@ docker exec "$CONTAINER" bash -c "
 " 2>&1 | sed 's/^/  /'
 
 # ── 5. (Re)launch the warm server as slurmuser ───────────────────────────────
-docker exec "$CONTAINER" bash -c 'pkill -9 python3 2>/dev/null; pkill -9 -f "[l]ibtpu" 2>/dev/null; rm -f /tmp/libtpu_lockfile; sleep 3'
+# Two execs, not one. With the lockfile path in the same `bash -c` string, "[l]ibtpu" still
+# matched "/tmp/libtpu_lockfile" in the shell's own command line: pkill killed that shell and the
+# rm never ran.
+docker exec "$CONTAINER" bash -c 'pkill -9 python3 2>/dev/null; pkill -9 -f "[l]ibtpu" 2>/dev/null; true'
+docker exec "$CONTAINER" bash -c 'rm -f /tmp/libtpu_lockfile; sleep 3'
 docker exec -d -u "$SLURMUSER_UID" "$CONTAINER" bash -c \
   'cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz NUMBA_CACHE_DIR=/tmp/numba_cache python3 -u tpu-boltz2-server.py > /tmp/tpu-boltz2-server.log 2>&1'
 
