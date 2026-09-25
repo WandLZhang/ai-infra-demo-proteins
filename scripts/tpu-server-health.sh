@@ -70,7 +70,8 @@ fi
 #   server responds + sentinel <  9 min → "ready"
 #   server responds + sentinel ≥  9 min → "loading"  (XLA cache may have evicted,
 #                                                      next keep-warm cron should refresh it)
-#   server process exists, no HTTP      → "loading"  (mid-compile / mid-startup)
+#   server process < 10 min, no HTTP    → "loading"  (mid-startup)
+#   server process ≥ 10 min, no HTTP    → wedged: kill it, fall through to restart block
 #   no server process                   → "offline" → fall through to restart block
 #
 # 9-min threshold: keep-warm cron fires every 5 min and the brca1-only
@@ -87,19 +88,33 @@ if curl -sf -m 5 http://localhost:8090/ > /dev/null 2>&1; then
   exit 0
 fi
 
-# HTTP didn't answer — process might still be alive but mid-compile, or dead.
-# Use pgrep to see if the python process exists; if yes, server is loading.
-if docker exec $CONTAINER bash -c "pgrep -f tpu-esmfold-server > /dev/null"; then
+# HTTP didn't answer. A server process younger than 10 minutes is still loading weights: eager
+# mode answers within about 70 s of starting. Older than that and still silent means it's wedged,
+# so kill it and fall through to the restart block. Before this check had an age limit, a wedged
+# server after the Sept 24 reboot reported "loading" every 5 minutes for two days and the
+# esmfold-tpu lane failed with "model server not ready".
+#
+# The [t] bracket keeps pgrep and pkill from matching the `bash -c` that runs them. The old
+# `pgrep -f tpu-esmfold-server` could match its own parent shell and always report a live server.
+SERVER_AGE=$(docker exec $CONTAINER bash -c 'for p in $(pgrep -f "[t]pu-esmfold-server"); do ps -o etimes= -p $p; done | sort -n | tail -1' 2>/dev/null | tr -d ' ')
+if [ -n "$SERVER_AGE" ] && [ "$SERVER_AGE" -lt 600 ]; then
   echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
   exit 0
+fi
+if [ -n "$SERVER_AGE" ]; then
+  echo "$(date) ESMFold server up ${SERVER_AGE}s without answering HTTP, treating it as wedged"
+  docker exec $CONTAINER bash -c 'pkill -9 -f "[t]pu-esmfold-server"' 2>/dev/null
+  sleep 3
 fi
 
 # ── 5. Server dead — restart cleanly ─────────────────────────────
 echo "$(date) ESMFold server dead, restarting as slurmuser..."
 echo '{"status":"loading"}' | gsutil -q cp - "$STATUS_BLOB" 2>/dev/null
 
-# Clear stale VFIO lock + pid file + prewarm sentinel
-docker exec $CONTAINER bash -c 'rm -f /tmp/libtpu_lockfile /tmp/tpu-model-server.pid /tmp/tpu-prewarm-done' 2>/dev/null
+# Clear stale VFIO lock + pid file + prewarm sentinel. The server runs as slurmuser and libtpu
+# writes its driver log under /tmp/tpu_logs; left root-owned, every line of the server log
+# becomes "Could not open the log file ... Permission denied".
+docker exec $CONTAINER bash -c 'rm -f /tmp/libtpu_lockfile /tmp/tpu-model-server.pid /tmp/tpu-prewarm-done; mkdir -p /tmp/tpu_logs; chmod 1777 /tmp/tpu_logs' 2>/dev/null
 sleep 2
 
 docker exec -d -u "$SLURMUSER_UID" $CONTAINER bash -c 'cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 BOLTZ_CACHE=/tmp/.boltz NUMBA_CACHE_DIR=/tmp/numba_cache python3 -u tpu-esmfold-server.py > /tmp/tpu-model-server.log 2>&1 & echo $! > /tmp/tpu-model-server.pid'

@@ -170,7 +170,7 @@ docker exec slurmd bash -c 'python3 -m venv --system-site-packages /tmp/jax-venv
 # warm server
 docker exec slurmd bash -c "mkdir -p /opt/backends /tmp/numba_cache && chmod 777 /tmp/numba_cache;
   gsutil -q cp \$BUCKET/backends/tpu-esmfold-server.py /opt/backends/tpu-esmfold-server.py"
-docker exec slurmd bash -c 'pkill -9 -f tpu-esmfold-server 2>/dev/null; rm -f /tmp/libtpu_lockfile; sleep 2'
+docker exec slurmd bash -c 'pkill -9 -f "[t]pu-esmfold-server" 2>/dev/null; rm -f /tmp/libtpu_lockfile; sleep 2'
 docker exec -d -u "\$UID_S" slurmd bash -c 'cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU \
   HF_HOME=/root/.cache/huggingface HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
   NUMBA_CACHE_DIR=/tmp/numba_cache python3 -u tpu-esmfold-server.py > /tmp/tpu-model-server.log 2>&1'
