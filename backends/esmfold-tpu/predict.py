@@ -1,4 +1,4 @@
-"""ESMFold on TPU via TorchTPU (torch_xla).
+"""ESMFold on TPU via PyTorch/XLA (torch_xla).
 
 Uses a persistent model server if running (port 8090). The server keeps
 the model warm — first call compiles XLA ops (~70s), subsequent calls ~9s.
