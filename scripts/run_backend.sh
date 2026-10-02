@@ -14,7 +14,6 @@ BACKEND_ID="${1:?backend_id required}"
 PROTEIN_ID="${2:?protein_id required}"
 
 JOB_DIR="$SHARED_BUCKET/job"
-BLOB_PATH="$JOB_DIR/$BACKEND_ID.json"
 MODEL=$(echo "$BACKEND_ID" | cut -d- -f1)
 SILICON=$(echo "$BACKEND_ID" | cut -d- -f2)
 
@@ -37,7 +36,6 @@ else
   PRICE_PER_SEC="$GPU_A100_PRICE_PER_SEC"
 fi
 
-LOG_DIR="$JOB_DIR/log"
 START_TIME=$(date +%s)
 
 # Point HuggingFace + Boltz caches to root's pre-warmed cache (HOME=/tmp in sbatch)
@@ -63,8 +61,8 @@ log_event() {
     JSON="$JSON,$EXTRA"
   fi
   JSON="$JSON}"
-  echo "$JSON" | gsutil -q cp - "$LOG_DIR/${SEQ}-${BACKEND_ID}.json" 2>/dev/null || true
-  echo "[$BACKEND_ID] $MSG"
+  echo "$JSON" | gcs_put "job/log/${SEQ}-${BACKEND_ID}.json" 2>/dev/null || true
+  echo "[$BACKEND_ID] event: $JSON"
 }
 
 update_state() {
@@ -89,7 +87,7 @@ update_state() {
     fi
   fi
 
-  cat <<EOF | gsutil -q cp - "$BLOB_PATH"
+  cat <<EOF | gcs_put "job/$BACKEND_ID.json"
 {
   "backend_id": "$BACKEND_ID",
   "protein_id": "$PROTEIN_ID",
@@ -185,7 +183,7 @@ if [[ -f "$PREDICT_SCRIPT" ]]; then
   # Must kill model server first to release VFIO, restart after
   if [[ "$BACKEND_ID" == "af2-tpu" ]]; then
     log_event "vfio_release" "killing model server for JAX VFIO access"
-    echo '{"status":"loading"}' | gsutil -q cp - "$SHARED_BUCKET/tpu-status.json" 2>/dev/null || true
+    echo '{"status":"loading"}' | gcs_put "tpu-status.json" 2>/dev/null || true
     # Kill all variants of the warm ESMFold server. The pidfile may be empty
     # (docker exec -d's $! doesn't propagate), so don't rely on it alone.
     kill -9 $(cat /tmp/tpu-model-server.pid 2>/dev/null) 2>/dev/null || true
@@ -227,7 +225,7 @@ if [[ -f "$PREDICT_SCRIPT" ]]; then
   OUTPUT_CHARS=$(wc -c < "$OUTPUT_FILE")
   OUTPUT_EXT="${OUTPUT_FILE##*.}"
   GCS_OUTPUT_PATH="$JOB_DIR/${BACKEND_ID}.${OUTPUT_EXT}"
-  gsutil -q cp "$OUTPUT_FILE" "$GCS_OUTPUT_PATH"
+  gcs_put "job/${BACKEND_ID}.${OUTPUT_EXT}" text/plain < "$OUTPUT_FILE"
 else
   echo "[${BACKEND_ID}] predict.py not staged yet, writing state progression"
   sleep 3
@@ -253,7 +251,7 @@ if [[ "$SILICON" == "tpu" ]]; then
   # Also kick off all-6-protein prewarm so badge auto-flips back to "ready".
   if [[ "$BACKEND_ID" == "af2-tpu" ]]; then
     log_event "server_restart" "restarting ESMFold server + prewarming all 6 proteins"
-    echo '{"status":"loading"}' | gsutil -q cp - "$SHARED_BUCKET/tpu-status.json" 2>/dev/null || true
+    echo '{"status":"loading"}' | gcs_put "tpu-status.json" 2>/dev/null || true
     rm -f /tmp/libtpu_lockfile /tmp/tpu-model-server.pid /tmp/tpu-prewarm-done 2>/dev/null
     sleep 2
     setsid runuser -u slurmuser -- bash -c 'cd /opt/backends && HOME=/tmp PJRT_DEVICE=TPU HF_HOME=/root/.cache/huggingface BOLTZ_CACHE=/tmp/.boltz NUMBA_CACHE_DIR=/tmp/numba_cache python3 -u tpu-esmfold-server.py > /tmp/tpu-model-server.log 2>&1 & echo $! > /tmp/tpu-model-server.pid' &

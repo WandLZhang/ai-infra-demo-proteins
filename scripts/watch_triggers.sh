@@ -11,7 +11,9 @@ exec 200>"$LOCKFILE"
 flock -n 200 || { echo "Another watcher already holds the flock, exiting"; exit 0; }
 echo $$ > "$LOCKFILE"
 
-POLL_INTERVAL=2
+# One check costs about 0.1 s through the JSON API (gsutil took 1.5 s), so a 1 s interval puts a
+# new trigger in front of predict.sh about half a second after the frontend writes it.
+POLL_INTERVAL=1
 TRIGGERS_PREFIX="triggers/"
 PROCESSED_DIR="/tmp/processed_triggers"
 mkdir -p "$PROCESSED_DIR"
@@ -22,17 +24,19 @@ echo "Polling every ${POLL_INTERVAL}s for $SHARED_BUCKET/${TRIGGERS_PREFIX}"
 echo ""
 
 while true; do
-  TRIGGER_FILES=$(gsutil ls "$SHARED_BUCKET/${TRIGGERS_PREFIX}*.json" 2>/dev/null || true)
+  TRIGGER_NAMES=$(gcs_list "$TRIGGERS_PREFIX" 2>/dev/null || true)
 
-  for TRIGGER_PATH in $TRIGGER_FILES; do
-    TRIGGER_FILE=$(basename "$TRIGGER_PATH")
+  for TRIGGER_NAME in $TRIGGER_NAMES; do
+    [[ "$TRIGGER_NAME" == *.json ]] || continue
+    TRIGGER_FILE=$(basename "$TRIGGER_NAME")
 
     if [ -f "$PROCESSED_DIR/$TRIGGER_FILE" ]; then
       continue
     fi
 
-    echo "[$(date)] New trigger: $TRIGGER_PATH"
-    TRIGGER_JSON=$(gsutil cat "$TRIGGER_PATH" 2>/dev/null)
+    echo "[$(date)] New trigger: $SHARED_BUCKET/$TRIGGER_NAME"
+    TRIGGER_JSON=$(gcs_get "$TRIGGER_NAME" 2>/dev/null)
+    echo "[$(date)] Trigger payload: $TRIGGER_JSON"
     PROTEIN_ID=$(echo "$TRIGGER_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['protein_id'])" 2>/dev/null)
 
     if [ -n "$PROTEIN_ID" ]; then
@@ -46,7 +50,7 @@ while true; do
     fi
 
     touch "$PROCESSED_DIR/$TRIGGER_FILE"
-    gsutil -q rm "$TRIGGER_PATH" 2>/dev/null || true
+    gcs_delete "$TRIGGER_NAME" 2>/dev/null || true
   done
 
   sleep "$POLL_INTERVAL"

@@ -52,3 +52,60 @@ export AR_REGION="${AR_REGION:-us-east5}"
 export TPU_PRICE_PER_SEC="0.000556"
 export GPU_H100_PRICE_PER_SEC="0.009831"
 export GPU_A100_PRICE_PER_SEC="0.001019"
+
+# ------------------------------------------------------------------
+# Cloud Storage through the JSON API with curl
+# ------------------------------------------------------------------
+# A gsutil call spends 1.2-1.7 s starting Python and authenticating; the same request through curl
+# takes about 0.1 s. Every status write in a demo run goes through these, so a run's first terminal
+# line lands seconds sooner. They authenticate as the VM's service account, as gsutil does.
+# Object names here use only [A-Za-z0-9._/-], so '/' is the only character that needs encoding.
+export SHARED_BUCKET_NAME="${SHARED_BUCKET#gs://}"
+
+gcs_token() {
+  curl -sf --max-time 5 -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+}
+
+# gcs_put OBJECT [CONTENT_TYPE] — upload stdin to the shared bucket.
+gcs_put() {
+  curl -sf -o /dev/null --max-time 20 --retry 3 -X POST --data-binary @- \
+    -H "Authorization: Bearer $(gcs_token)" -H "Content-Type: ${2:-application/json}" \
+    "https://storage.googleapis.com/upload/storage/v1/b/$SHARED_BUCKET_NAME/o?uploadType=media&name=${1//\//%2F}"
+}
+
+# gcs_get OBJECT — print an object from the shared bucket.
+gcs_get() {
+  curl -sf --max-time 20 --retry 3 -H "Authorization: Bearer $(gcs_token)" \
+    "https://storage.googleapis.com/storage/v1/b/$SHARED_BUCKET_NAME/o/${1//\//%2F}?alt=media"
+}
+
+# gcs_delete OBJECT
+gcs_delete() {
+  curl -sf -o /dev/null --max-time 20 --retry 3 -X DELETE -H "Authorization: Bearer $(gcs_token)" \
+    "https://storage.googleapis.com/storage/v1/b/$SHARED_BUCKET_NAME/o/${1//\//%2F}"
+}
+
+# gcs_list PREFIX — print the names of the objects under PREFIX, one per line, across all pages.
+gcs_list() {
+  python3 - "$SHARED_BUCKET_NAME" "$1" "$(gcs_token)" <<'PY'
+import json, sys, urllib.parse, urllib.request
+bucket, prefix, token = sys.argv[1:4]
+page = ""
+while True:
+    query = {"prefix": prefix, "fields": "items(name),nextPageToken"}
+    if page:
+        query["pageToken"] = page
+    req = urllib.request.Request(
+        f"https://storage.googleapis.com/storage/v1/b/{bucket}/o?{urllib.parse.urlencode(query)}",
+        headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        listing = json.load(resp)
+    for item in listing.get("items", []):
+        print(item["name"])
+    page = listing.get("nextPageToken")
+    if not page:
+        break
+PY
+}

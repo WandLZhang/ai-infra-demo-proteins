@@ -9,8 +9,6 @@ source "$SCRIPT_DIR/env.sh" 2>/dev/null || true
 POLL_INTERVAL=3
 SLURM_LOG="/var/log/slurm/slurmctld.log"
 LAST_LOG_BYTES=0
-JOB_DIR="$SHARED_BUCKET/job"
-LOG_DIR="$JOB_DIR/log"
 
 declare -A CACHED_STATE
 
@@ -43,7 +41,7 @@ add_event() {
     JSON="$JSON,$EXTRA"
   fi
   JSON="$JSON}"
-  echo "$JSON" | gsutil -q cp - "$LOG_DIR/${SEQ}-slurmctld.json" 2>/dev/null || true
+  echo "$JSON" | gcs_put "job/log/${SEQ}-slurmctld.json" 2>/dev/null || true
   echo "[poll] $TS $MSG"
 }
 
@@ -83,6 +81,8 @@ LAST_LOG_BYTES=$(sudo wc -c < "$SLURM_LOG" 2>/dev/null || echo "0")
 
 echo "[poll_squeue] watching slurmctld.log from byte $LAST_LOG_BYTES"
 
+RUN_ACTIVE=0
+
 while true; do
   # Check if any protein-demo jobs are active
   SQUEUE=$(squeue --noheader --format="%j %T" 2>/dev/null | grep -E "^(af2|esmfold|boltz2)-" || true)
@@ -90,12 +90,15 @@ while true; do
   scan_log
 
   if [ -z "$SQUEUE" ]; then
-    # No active jobs — check if a manifest exists (run was started)
-    if gsutil -q stat "$JOB_DIR/manifest.json" 2>/dev/null; then
+    # No active jobs. Report the end of a run once, on the first idle poll after it. Writing this
+    # on every idle poll left a file every 13 s for the next run to delete before it could start.
+    if (( RUN_ACTIVE )); then
       add_event "complete" "All jobs exited squeue"
+      RUN_ACTIVE=0
     fi
     sleep 10
   else
+    RUN_ACTIVE=1
     sleep "$POLL_INTERVAL"
   fi
 done
