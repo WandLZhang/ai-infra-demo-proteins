@@ -246,15 +246,18 @@ while (( GPU_DONE == 0 || TPU_DONE == 0 )); do
 
   if (( GPU_DONE == 0 )); then
     if [[ "$(node_state "$SPOT_GPU_NODE")" == "DOWN" ]]; then
-      fail_over gpu a100spoteast5 us-east5 "spot-gpu us-east5-b: $(node_reason "$SPOT_GPU_NODE") → resubmitting to gpu"
+      echo "  spot-gpu node DOWN after ${WAITED}s: $(node_reason "$SPOT_GPU_NODE")"
+      fail_over gpu a100spoteast5 us-east5 "spot-gpu us-east5-b: intentional preempt → resubmitting to gpu"
       GPU_DONE=1
     elif (( WAITED >= SPOT_CAP )); then
-      fail_over gpu a100spoteast5 us-east5 "spot-gpu us-east5-b: no Spot VM after ${SPOT_CAP} s → resubmitting to gpu"
+      echo "  spot-gpu node still $(node_state "$SPOT_GPU_NODE") at the ${SPOT_CAP}s cap"
+      fail_over gpu a100spoteast5 us-east5 "spot-gpu us-east5-b: intentional preempt → resubmitting to gpu"
       GPU_DONE=1
     fi
   fi
   if (( TPU_DONE == 0 && WAITED >= SPOT_CAP )); then
-    fail_over tpu tpuv6ewest1c us-west1 "spot-tpu us-west1-c: no Spot TPU after ${SPOT_CAP} s → resubmitting to tpu"
+    echo "  spot-tpu node still $(node_state "$SPOT_TPU_NODE") at the ${SPOT_CAP}s cap"
+    fail_over tpu tpuv6ewest1c us-west1 "spot-tpu us-west1-c: intentional preempt → resubmitting to tpu"
     TPU_DONE=1
   fi
 done
