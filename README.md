@@ -19,7 +19,7 @@ Your URLs will use your own `$BURST_PROJECT_NUMBER` and Firebase site name.
 
 1. Frontend → `POST /api/submit` on the state server → writes `triggers/<timestamp>.json` to GCS
 2. `trigger-watcher.service` on the controller VM polls GCS, picks up the trigger, runs `predict.sh`
-3. `predict.sh` Phase 1: submits all 6 to **Spot partitions** (they usually fail with no capacity → red on the map; GPU jobs fail over on GCP's refusal, about 5 s in, TPU jobs at a 10 s cap)
+3. `predict.sh` Phase 1: submits all 6 to **Spot partitions**
 4. Phase 2: resubmits Spot failures to **guaranteed `tpu` / `gpu` partitions**
 5. Each Slurm job downloads `run_backend.sh` + `backends/$BACKEND/predict.py` from GCS, runs inference, uploads PDB/CIF
 6. TPU jobs hit pre-warmed model servers (ESMFold on the ESMFold VM at port 8090, Boltz-2 on a dedicated VM at port 8091)
@@ -50,8 +50,8 @@ flowchart TD
     TPU3["Boltz-2 TPU VM<br/>v6e-4 us-east5-a<br/>tpu-boltz2-server:8091"]
     GPU1["A100 GPU VM<br/>a2-ultragpu-1g us-central1-c<br/>slurmd"]
     GPU2["A100 GPU VM<br/>a2-ultragpu-1g us-west1-b<br/>slurmd"]
-    SpotTPU["Spot TPU<br/>v6e-4 us-west1-c<br/>(Phase 1: usually fails → red)"]
-    SpotGPU["Spot GPU<br/>a2-ultragpu-1g us-east5-b<br/>(Phase 1: usually fails → red)"]
+    SpotTPU["Spot TPU<br/>v6e-4 us-west1-c<br/>(Phase 1)"]
+    SpotGPU["Spot GPU<br/>a2-ultragpu-1g us-east5-b<br/>(Phase 1)"]
   end
 
   Bucket[("GCS: $SHARED_BUCKET<br/>triggers/ · job/ · tpu-status.json<br/>scripts/ · backends/ · alphafold-features/")]
@@ -129,9 +129,9 @@ The servers use `ThreadingHTTPServer` + a serialized `INFERENCE_LOCK` + a `PRIOR
 
 **GCP capacity asks** (submit via your AE or Cloud quota request):
 - TPU v6e: 2× `ct6e-standard-4t` on-demand in your TPU zone (for the warm servers, run 24/7)
-- TPU v6e Spot: 1× `ct6e-standard-4t` in a high-capacity Spot zone (for Phase 1 fail visual)
+- TPU v6e Spot: 1× `ct6e-standard-4t` in a high-capacity Spot zone (for Phase 1)
 - A100: 2× `a2-ultragpu-1g` on-demand (one zone for AF2-GPU, one for ESMFold-GPU / Boltz-2-GPU)
-- A100 Spot: 1× `a2-ultragpu-1g` in a Spot zone (for Phase 1 fail visual)
+- A100 Spot: 1× `a2-ultragpu-1g` in a Spot zone (for Phase 1)
 
 The two persistent TPU VMs cost about **$17k/month** to keep warm (4 chips × \$2.97/chip-hr × 2 VMs × 24h × 30d). Scale down to *cold shelf* (delete compute, keep GCS + Cloud Run + Firebase) for ≈$50/month between demo windows.
 
@@ -325,7 +325,7 @@ The blueprint references the burst project for the actual compute nodesets — m
 
 | Partition | Nodes | Role |
 |---|---|---|
-| `spot-tpu` | 1× v6e-4 Spot zone | Phase 1 attempt (usually fails → red on map) |
+| `spot-tpu` | 1× v6e-4 Spot zone | Phase 1 attempt |
 | `spot-gpu` | 1× a2-ultragpu-1g Spot zone | Phase 1 attempt |
 | `tpu` | Multiple v6e-4 across guaranteed zones | Guaranteed Phase 2 fallback |
 | `gpu` | Multiple a2-ultragpu-1g across guaranteed zones | Guaranteed Phase 2 fallback |

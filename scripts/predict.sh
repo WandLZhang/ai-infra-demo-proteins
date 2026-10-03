@@ -3,8 +3,8 @@
 #
 # Two-phase submission:
 #   Phase 1: Submit all 6 to Spot partitions (spot-tpu, spot-gpu). Shows Spot attempt.
-#   Phase 2: Fail over to guaranteed partitions (tpu, gpu): the GPU jobs as soon as GCP
-#            refuses the Spot VM, the TPU jobs after SPOT_CAP seconds. If Spot succeeded, jobs stay.
+#   Phase 2: Fail over to guaranteed partitions (tpu, gpu): the GPU jobs as soon as their Spot
+#            node goes DOWN, the TPU jobs after SPOT_CAP seconds. If Spot succeeded, jobs stay.
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -152,11 +152,10 @@ if [[ -n "$OLD_EVENTS" ]]; then
 fi
 
 # ── Phase 2: Fail over to guaranteed partitions as Spot answers ──
-# GPU: as soon as Slurm marks the Spot node DOWN, which is GCP refusing the VM, about 5 s in.
-# TPU: after SPOT_CAP seconds. GCP refuses the Spot TPU about 11 s in, but slurm-gcp's TPU resume
-# crashes on that error instead of marking the node DOWN, so Slurm only finds out at its 60 s
-# ResumeTimeout. No Spot node has come up since May 2026, so the cap gives up nothing. The GPU
-# jobs also go at the cap if GCP hasn't answered by then.
+# GPU: as soon as Slurm marks the Spot node DOWN.
+# TPU: after SPOT_CAP seconds. When the TPU API rejects a create, slurm-gcp's TPU resume exits
+# without marking the node DOWN, so Slurm would only find out at its 60 s ResumeTimeout. The GPU
+# jobs also go at the cap if their node is still starting.
 SPOT_CAP=10
 SPOT_GPU_NODE="nihprotein-a100spoteast5-0"
 SPOT_TPU_NODE="nihprotein-tpuv6ewest1c-0"
