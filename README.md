@@ -19,7 +19,7 @@ Your URLs will use your own `$BURST_PROJECT_NUMBER` and Firebase site name.
 
 1. Frontend → `POST /api/submit` on the state server → writes `triggers/<timestamp>.json` to GCS
 2. `trigger-watcher.service` on the controller VM polls GCS, picks up the trigger, runs `predict.sh`
-3. `predict.sh` Phase 1: submits all 6 to **Spot partitions** (65s timeout, usually fail with no capacity → red on the map)
+3. `predict.sh` Phase 1: submits all 6 to **Spot partitions** (they usually fail with no capacity → red on the map; GPU jobs fail over on GCP's refusal, about 5 s in, TPU jobs at a 10 s cap)
 4. Phase 2: resubmits Spot failures to **guaranteed `tpu` / `gpu` partitions**
 5. Each Slurm job downloads `run_backend.sh` + `backends/$BACKEND/predict.py` from GCS, runs inference, uploads PDB/CIF
 6. TPU jobs hit pre-warmed model servers (ESMFold on the ESMFold VM at port 8090, Boltz-2 on a dedicated VM at port 8091)
