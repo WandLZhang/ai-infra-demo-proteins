@@ -47,8 +47,12 @@ def _read_job_state():
     bucket = get_bucket()
     lanes = {}
     for bid in ALL_BACKENDS:
-        blob = bucket.blob(f"{JOB_PREFIX}{bid}.json")
-        if blob.exists():
+        # get_blob reads the metadata, so the download asks for the current generation. A plain download
+        # of these public objects can come from Google's edge cache (Cache-Control max-age=3600): on
+        # 2026-10-07 the server saw af2-gpu "inferring" for minutes after it finished, and every submit
+        # in that window answered already_running.
+        blob = bucket.get_blob(f"{JOB_PREFIX}{bid}.json")
+        if blob is not None:
             try:
                 lanes[bid] = json.loads(blob.download_as_text())
             except json.JSONDecodeError:
