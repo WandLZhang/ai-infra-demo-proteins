@@ -480,7 +480,11 @@ sudo docker exec slurmd bash -c 'gsutil -q cp '$SHARED_BUCKET'/scripts/gpu-node-
 (sudo crontab -l 2>/dev/null | grep -v gpu-health; echo '*/10 * * * * /opt/gpu-health.sh >> /tmp/gpu-health.log 2>&1') | sudo crontab -
 ```
 
-If the kernel auto-upgrades the NVIDIA driver module may break — the GRUB default should be pinned (e.g., `6.8.0-1047-gcp` in `/etc/default/grub.d/50-cloudimg-settings.cfg`).
+Do the next three on every A100 node. GPU VMs can't live-migrate, so a host maintenance event stops them, and the reboot after it is where each of these bites:
+
+- **Pin the kernel that has the NVIDIA module.** Unattended upgrades install new `linux-image-*-gcp` kernels, and the NVIDIA module package doesn't always follow. Booting a kernel with no `nvidia.ko` leaves the GPU dead and the container down. Set `GRUB_DEFAULT` to that kernel's advanced entry in both `/etc/default/grub` and `/etc/default/grub.d/50-cloudimg-settings.cfg` (e.g., `6.8.0-1047-gcp`), run `update-grub`, and `apt-mark hold` both the kernel image and its `linux-modules-nvidia-*` package so autoremove keeps them.
+- **Restart after maintenance:** `gcloud compute instances set-scheduling <GPU_VM_NAME> --zone <ZONE> --restart-on-failure`. With the default `automaticRestart: false`, a maintenance stop leaves the VM TERMINATED.
+- **A startup script that loads the driver and recreates the container** (`modprobe nvidia`, then the `docker run` above). Let the container's systemd start slurmd. If the script also starts one, it must first wait for `systemctl is-active slurmd`: a second slurmd kills the first, along with any job it launched in the seconds after boot.
 
 ## Step 6 — push scripts and backend code to GCS
 
@@ -678,7 +682,7 @@ Press Enter any number of times — the system picks up an existing run or start
 | Badge stuck on `loading` | Sentinel >10 min — check `/tmp/tpu-keepwarm.log` for SKIP reasons; manually: `sudo /opt/tpu-keep-warm.sh` |
 | Boltz-2 server down (crash / lost `/tmp` weight cache) | Run `sudo /opt/tpu-boltz2-health.sh` on east5a-3 (the `*/5`+`@reboot` cron does this) — it re-runs `boltz2_node_setup.sh`, which re-fetches the weight cache from `gs://…/boltz-cache/` and relaunches the server. |
 | Boltz-2 `Failed to get global TPU topology` / `No hardware is found` | The host rebooted and de-initialized the v6e chips. **Unrecoverable on-node** (QR TPUs can't `stop`/`start`). Recover by recreating the queued resource: `bash scripts/recreate_tpu_node.sh boltz` (delete + recreate with **`runtime-version=v2-alpha-tpuv6e`** + redeploy + republish the new internal IP to `gs://…/config/boltz_host`). **Do NOT recreate with `tpu-ubuntu2204-base`** — as of 2026-06 that image ships no TPU access daemon (`VBARCONTROL_AGENT_DOCKER_URL=""`, `fake_tensorflow` only), so libtpu can never init. |
-| Node "idle*" or "Not responding" | Restart slurmd: `docker exec slurmd bash -c 'slurmd --conf-server=<CONTROLLER_INTERNAL_IP>:6820 -N <name> &'` |
+| Node "idle*" or "Not responding" | Restart slurmd through the container's systemd: `docker exec slurmd systemctl restart slurmd`. Don't start a second slurmd by hand: it kills the first and any job that one launched. On a GPU node, check `nvidia-smi` first; if the driver is missing, the node booted a kernel without the NVIDIA module (see the A100 notes in Step 5). |
 | predict.sh double-run | `systemctl stop trigger-watcher` before manual runs |
 
 ## Files
