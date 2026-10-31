@@ -125,6 +125,28 @@ write_event() {
   EVENT_PIDS+=($!)
 }
 
+# fail_lane BACKEND ERROR — for a job sbatch refused: a terminal "failed" blob and event, so the frontend
+# shows the error and the state server stops answering already_running to every submit (a lane left
+# "queued" never finishes, so the run never ends).
+fail_lane() {
+  local BACKEND="$1" ERR="$2" NOW
+  NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  cat <<EOF | gcs_put "job/$BACKEND.json"
+{
+  "backend_id": "$BACKEND",
+  "protein_id": "$PROTEIN_ID",
+  "state": "failed",
+  "started_at": "$NOW",
+  "completed_at": "$NOW",
+  "elapsed_ms": 0,
+  "cost_accumulated": 0.0,
+  "result": null,
+  "error": "$ERR"
+}
+EOF
+  write_event failed "$BACKEND: submit failed: $ERR" "\"backend\":\"$BACKEND\",\"error\":\"$ERR\"" dispatch
+}
+
 # ── Phase 1: Submit all to Spot partitions ──
 declare -A SPOT_JOBS
 echo "Phase 1: trying Spot..."
@@ -216,6 +238,12 @@ fail_over() {
       --output="/dev/null" \
       --error="/dev/null" \
       <<< "$(job_script "$BACKEND")" 2>&1)
+    if [[ -z "$NEW_JOB_ID" || "$NEW_JOB_ID" == *[!0-9]* ]]; then
+      ERR="$(printf '%s' "$NEW_JOB_ID" | tr -d '"\\' | tr '\n' ' ')"
+      echo "  $BACKEND → $PARTITION submit FAILED: $ERR"
+      fail_lane "$BACKEND" "$ERR"
+      continue
+    fi
     if [[ "$SILICON" == "tpu" ]]; then
       PREV_TPU_JOB="$NEW_JOB_ID"
     fi

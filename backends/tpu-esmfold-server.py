@@ -31,11 +31,30 @@ INFERENCE_LOCK = threading.Lock()
 PRIORITY_CV = threading.Condition()
 HIGH_PRIO_PENDING = 0
 
-print("[tpu-server] loading ESMFold...")
+
+
+def _accelerator_type():
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "http://metadata.google.internal/computeMetadata/v1/instance/attributes/accelerator-type",
+            headers={"Metadata-Flavor": "Google"})
+        return urllib.request.urlopen(req, timeout=2).read().decode()
+    except Exception:
+        return ""
+
+
+ACCELERATOR = _accelerator_type()
+print(f"[tpu-server] loading ESMFold on {ACCELERATOR or 'unknown accelerator'}...")
 ESM_TOKENIZER = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-ESM_MODEL = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").to(DEVICE).eval()
+ESM_MODEL = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1")
+# A v5e chip has 16 GB of HBM and the fp32 model is about 14 GB, so there the language-model stem runs in
+# bfloat16. EsmForProteinFolding casts the stem's output back to the trunk's dtype.
+if ACCELERATOR.startswith("v5litepod") or os.environ.get("ESMFOLD_LM_BF16") == "1":
+    ESM_MODEL.esm = ESM_MODEL.esm.to(torch.bfloat16)
+ESM_MODEL = ESM_MODEL.to(DEVICE).eval()
 torch.set_grad_enabled(False)
-print("[tpu-server] ESMFold loaded on TPU")
+print(f"[tpu-server] ESMFold loaded on TPU (language model in {ESM_MODEL.esm.dtype})")
 
 
 class ESMFoldHandler(BaseHTTPRequestHandler):

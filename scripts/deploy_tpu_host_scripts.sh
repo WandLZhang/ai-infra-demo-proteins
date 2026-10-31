@@ -29,13 +29,12 @@ source "$SCRIPT_DIR/env.sh"
 
 # ESMFold VM (drives the badge) + dedicated Boltz-2 VM.
 #
-# ⚠️ The ESMFold host's TPU node id is NOT its Slurm node name. The original
-# nihprotein-tpuv6eeast5a-0 was lost to a preemption in 2026-07 and us-east5-a had no v6e
-# capacity to rebuild it, so the replacement was provisioned in us-east5-b as nih-v6e-e5b
-# and registers with slurmctld under the OLD east5a-0 name (keepalive.sh pins its NodeAddr).
-# gcloud needs the real node id and zone; Slurm needs the registered name. Keep them apart.
-TPU_VM="${TPU_VM:-nih-v6e-e5b}"
-TPU_ZONE="${TPU_ZONE:-us-east5-b}"
+# ⚠️ The ESMFold host's TPU node id is NOT its Slurm node name. The live host is nih-v5e-c1a,
+# a v5e-4 in us-central1-a, and it registers with slurmctld under the original east5a-0 name
+# (keepalive.sh pins its NodeAddr). gcloud needs the real node id and zone; Slurm needs the
+# registered name. Keep them apart.
+TPU_VM="${TPU_VM:-nih-v5e-c1a}"
+TPU_ZONE="${TPU_ZONE:-us-central1-a}"
 TPU_SLURM_NODE="${TPU_ESMFOLD_NODE:-nihprotein-tpuv6eeast5a-0}"
 BOLTZ_TPU_VM="${BOLTZ_TPU_VM:-nihprotein-tpuv6eeast5a-3}"
 BOLTZ_TPU_ZONE="${BOLTZ_TPU_ZONE:-us-east5-a}"
@@ -63,6 +62,10 @@ gcloud compute tpus tpu-vm ssh "$TPU_VM" --zone="$TPU_ZONE" --project="$BURST_PR
   sudo chmod +x /opt/tpu-server-health.sh /opt/tpu-keep-warm.sh
   echo "  installed: /opt/tpu-server-health.sh ($(stat -c %s /opt/tpu-server-health.sh) bytes)"
   echo "  installed: /opt/tpu-keep-warm.sh    ($(stat -c %s /opt/tpu-keep-warm.sh) bytes)"
+  ( sudo crontab -l 2>/dev/null | grep -v -E "tpu-server-health.sh|tpu-keep-warm.sh"
+    echo "*/5 * * * * /opt/tpu-server-health.sh >> /tmp/tpu-health.log 2>&1"
+    echo "*/8 * * * * /opt/tpu-keep-warm.sh >> /tmp/tpu-keepwarm.log 2>&1" ) | sudo crontab -
+  echo "  cron now:"; sudo crontab -l | sed "s/^/    /"
 ' 2>&1 | grep -v "To increase"
 
 echo ""

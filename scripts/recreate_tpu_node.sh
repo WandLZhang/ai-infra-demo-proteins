@@ -6,7 +6,9 @@
 #   bash scripts/recreate_tpu_node.sh esmfold   # the ESMFold + Slurm compute node (:8090)
 #
 # WHEN TO USE: the warm server is down AND the TPU is dead at the hardware level — the server
-# log says "Failed to get global TPU topology" / "No hardware is found". A host-maintenance
+# log says "Failed to get global TPU topology" / "No hardware is found", or every TPU init fails
+# with "START_SESSION failed. Contact GCE with UUID" (seen 2026-10-30 after a host-maintenance
+# reboot; a guest reboot and a container restart didn't clear it). A host-maintenance
 # reboot de-initializes the chips, and that is UNRECOVERABLE in-guest because:
 #   - QR-backed TPUs cannot stop/start ("StopNode is not supported for queued resources"),
 #     so there is no in-place re-provision; only delete + recreate re-initializes the chips.
@@ -50,10 +52,14 @@ case "$ROLE" in
     # The ESMFold node also serves as Slurm compute node east5a-0: all three TPU lanes
     # (esmfold/boltz2/af2) dispatch here and run serialized, so it needs slurmd + munge on
     # top of the warm server. SLURM_NODE is the name the controller knows, which is NOT the
-    # TPU node id — the live node lives in us-east5-b but registers as the east5a-0 name.
-    QR="${ESMFOLD_QR:-qr-be-e5b}"
-    NODE="${ESMFOLD_TPU_VM:-nih-v6e-e5b}"
-    ZONE="${ESMFOLD_TPU_ZONE:-us-east5-b}"
+    # TPU node id — the live node is a v5e in us-central1-a but registers as the east5a-0 name.
+    # Its Slurm definition in the controller's cloud.conf is sized for that host (112 CPUs,
+    # RealMemory=190000); a node of another type needs that line changed to match.
+    QR="${ESMFOLD_QR:-qr-esm-v5e-c1a}"
+    NODE="${ESMFOLD_TPU_VM:-nih-v5e-c1a}"
+    ZONE="${ESMFOLD_TPU_ZONE:-us-central1-a}"
+    ACCEL="${TPU_ACCEL:-v5litepod-4}"
+    RUNTIME="${TPU_RUNTIME:-v2-alpha-tpuv5-lite}"   # the v5e runtime that ships the vbar access daemon
     SLURM_NODE="${TPU_ESMFOLD_NODE:-nihprotein-tpuv6eeast5a-0}"
     CTRL_IP="${SLURMCTLD_IP:-172.16.0.2}"      # slurmctld runs on biowulf-controller, ports 6820-6830
     CTRL_VM="${CONTROLLER_VM_NAME:-biowulf-controller}"
@@ -66,13 +72,19 @@ esac
 
 echo "$(ts) role=$ROLE  qr=$QR  node=$NODE  zone=$ZONE  port=$PORT"
 
-echo "$(ts) [1/6] deleting QR $QR (frees the dead chips)"
-gcloud compute tpus queued-resources delete "$QR" --zone="$ZONE" --project="$PROJECT" --force --quiet 2>&1 | tail -2
+# SKIP_CREATE=1 brings up a QR that is already ACTIVE (for example one requested by hand in a
+# second zone while the first waited for capacity) instead of deleting and recreating it.
+if [ "${SKIP_CREATE:-0}" != 1 ]; then
+  echo "$(ts) [1/6] deleting QR $QR (frees the dead chips)"
+  gcloud compute tpus queued-resources delete "$QR" --zone="$ZONE" --project="$PROJECT" --force --quiet 2>&1 | tail -2
 
-echo "$(ts) [2/6] creating QR $QR  accel=$ACCEL runtime=$RUNTIME"
-gcloud compute tpus queued-resources create "$QR" \
-  --node-id="$NODE" --zone="$ZONE" --project="$PROJECT" \
-  --accelerator-type="$ACCEL" --runtime-version="$RUNTIME" --network=default 2>&1 | tail -3
+  echo "$(ts) [2/6] creating QR $QR  accel=$ACCEL runtime=$RUNTIME"
+  gcloud compute tpus queued-resources create "$QR" \
+    --node-id="$NODE" --zone="$ZONE" --project="$PROJECT" \
+    --accelerator-type="$ACCEL" --runtime-version="$RUNTIME" --network=default 2>&1 | tail -3
+else
+  echo "$(ts) [1-2/6] SKIP_CREATE=1: using the existing QR $QR"
+fi
 
 echo "$(ts) [3/6] waiting for ACTIVE"
 for i in $(seq 1 40); do
@@ -88,6 +100,11 @@ IP=$(gcloud compute tpus tpu-vm describe "$NODE" --zone="$ZONE" --project="$PROJ
 EXT=$(gcloud compute tpus tpu-vm describe "$NODE" --zone="$ZONE" --project="$PROJECT" --format="value(networkEndpoints[0].accessConfig.externalIp)" 2>&1)
 echo "  internal=$IP external=$EXT"
 [ -z "$IP" ] && { echo "$(ts) no IP yet — aborting"; exit 1; }
+
+# A fresh node has no SSH key for us: the project carries none, and the old node's key lived in its own
+# metadata. gcloud writes ours into the new node's metadata before the raw ssh and scp below.
+gcloud compute tpus tpu-vm ssh "$SSH_USER@$NODE" --zone="$ZONE" --project="$PROJECT" --command=true >/dev/null 2>&1 \
+  && echo "  ssh key seeded for $SSH_USER" || echo "  ssh key seeding failed; raw ssh may be refused"
 
 SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 $SSH_USER@$EXT"
 sleep 25  # allow SSH key propagation on the fresh node
@@ -180,13 +197,13 @@ EOSSH
   echo "$(ts) [6/6] repointing keepalive + Slurm NodeAddr to $IP on $CTRL_VM"
   # keepalive.sh re-marks the node IDLE every 30s and pins NodeAddr; it hardcodes the address,
   # so a recreated node with a new IP must be written in or Slurm keeps dispatching into the void.
+  # keepalive.sh also pins the central A100's address, so the sed edits only this node's line.
   gcloud compute ssh "$CTRL_VM" --project="$CTRL_PROJECT" --zone="$CTRL_ZONE" --tunnel-through-iap --command="
-    sudo sed -i -E 's/NodeAddr=[0-9.]+/NodeAddr=$IP/g' /opt/protein-demo/keepalive.sh
+    sudo sed -i -E '/NodeName=$SLURM_NODE /s/NodeAddr=[0-9.]+/NodeAddr=$IP/' /opt/protein-demo/keepalive.sh
     sudo scontrol update NodeName=$SLURM_NODE NodeAddr=$IP State=RESUME 2>/dev/null || \
       sudo scontrol update NodeName=$SLURM_NODE NodeAddr=$IP 2>/dev/null
-    # restart keepalive without matching this ssh command line (pkill -f would kill the session)
-    for p in \$(ps -eo pid,args | grep '[k]eepalive\.sh' | awk '{print \$1}'); do sudo kill \$p 2>/dev/null; done
-    sudo bash -c 'setsid nohup /opt/protein-demo/keepalive.sh </dev/null >/tmp/keepalive.log 2>&1 &'
+    # keepalive runs as node-keepalive.service; a hand-started copy would run beside the one systemd restarts
+    sudo systemctl restart node-keepalive
     sleep 5
     echo \"  NodeAddr=\$(sudo scontrol show node $SLURM_NODE | grep -o 'NodeAddr=[0-9.]*')\"
     echo \"  sinfo: \$(sinfo -N -n $SLURM_NODE -h -o '%t %E')\"
