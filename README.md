@@ -170,7 +170,7 @@ Variables (defaults shown; all `${VAR:-default}` so any exported value wins):
 | `SHARED_BUCKET` | `gs://wz-nih-demo-shared` | Shared GCS bucket (must be in `BURST_PROJECT_ID`) |
 | `BOLTZ_HOST` / `BOLTZ_PORT` | `10.202.0.23:8091` | Boltz-2 warm server's internal IP/port (set after VM creation) |
 | `AR_REPO` / `AR_REGION` | `proteins` / `us-east5` | Artifact Registry repo for container images |
-| `TPU_PRICE_PER_SEC` etc. | (per-second \$ from Billing Catalog) | Used by the cost ticker in the frontend |
+| `TPU_V5E_PRICE_PER_SEC`, `TPU_V6E_PRICE_PER_SEC`, `GPU_A100_PRICE_PER_SEC` | (per-second \$ for one accelerator on demand, from the Billing Catalog) | Used by `run_backend.sh` for each lane's cost, which the frontend shows |
 
 ### `local-controller/frontend/.env` — frontend secrets
 

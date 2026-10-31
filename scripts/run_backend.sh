@@ -29,9 +29,12 @@ SEQUENCES=(
 )
 SEQUENCE="${SEQUENCES[$PROTEIN_ID]:-${SEQUENCES[hemoglobin]}}"
 
-# Pricing
-if [[ "$SILICON" == "tpu" ]]; then
-  PRICE_PER_SEC="$TPU_PRICE_PER_SEC"
+# Pricing: one accelerator on demand (env.sh). The Boltz-2 TPU lane's inference runs on the v6e Boltz
+# node; the other TPU lanes run on the v5e node this job lands on.
+if [[ "$BACKEND_ID" == "boltz2-tpu" ]]; then
+  PRICE_PER_SEC="$TPU_V6E_PRICE_PER_SEC"
+elif [[ "$SILICON" == "tpu" ]]; then
+  PRICE_PER_SEC="$TPU_V5E_PRICE_PER_SEC"
 else
   PRICE_PER_SEC="$GPU_A100_PRICE_PER_SEC"
 fi

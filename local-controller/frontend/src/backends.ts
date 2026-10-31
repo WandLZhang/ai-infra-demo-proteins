@@ -3,10 +3,11 @@
 // Each backend exposes /api/predict and /api/ready. The frontend fans out
 // a single protein to all 6 in parallel and tabulates cost + time.
 //
-// pricePerSec from Cloud Billing Catalog API SKUs (2026-05-19):
-//   TPU v6e Spot:  4 chips × $0.50/chip-hr ÷ 3600 = $0.000556/sec
-//   A100 40GB Spot: 1 chip × $1.10/chip-hr ÷ 3600 = $0.000306/sec
-//   H100 Mega Spot: 8 chips × $2.20/chip-hr ÷ 3600 = $0.004889/sec
+// pricePerSec is the on-demand price of one accelerator, the smallest machine that runs each job, from
+// the Cloud Billing Catalog API (2026-10-31). Each TPU job uses one chip.
+//   TPU v5e (ESMFold, AF2):     1 chip × $1.20/chip-hr ÷ 3600 = $0.000333/sec
+//   TPU v6e (Boltz-2):          1 chip × $2.70/chip-hr ÷ 3600 = $0.000750/sec
+//   A100 40GB (a2-highgpu-1g):  $3.673385/hr ÷ 3600           = $0.001020/sec
 
 import type { BackendId, ModelId, SiliconId } from './types'
 
@@ -31,16 +32,16 @@ export const BACKENDS: AcceleratorBackend[] = [
     id: 'af2-tpu',
     modelId: 'af2',
     siliconId: 'tpu',
-    label: 'AlphaFold 2 — TPU v6e Trillium',
+    label: 'AlphaFold 2 — TPU v5e',
     shortLabel: 'AF2 · TPU',
     modelName: 'AlphaFold 2',
-    siliconName: 'TPU v6e',
+    siliconName: 'TPU v5e',
     apiBase: '', // will be set at deploy time
-    pricePerSec: 0.000556,
+    pricePerSec: 0.000333,
     accent: 'border-emerald-400/60',
     talkTrackSlide: 11,
     talkTrackLabel: 'AlphaFold on TPU — Biowulf runs this on A100s',
-    blurb: 'v6e-4 (4 Trillium chips) Spot — JAX/Haiku native',
+    blurb: 'v5e-4 on demand, one chip per job — JAX/Haiku native',
   },
   {
     id: 'af2-gpu',
@@ -51,26 +52,26 @@ export const BACKENDS: AcceleratorBackend[] = [
     modelName: 'AlphaFold 2',
     siliconName: 'A100 40GB',
     apiBase: '',
-    pricePerSec: 0.001019,
+    pricePerSec: 0.00102,
     accent: 'border-amber-400/60',
     talkTrackSlide: 3,
     talkTrackLabel: 'NVIDIA on Google Cloud — Cloud RDMA + Falcon',
-    blurb: 'A100 40GB Spot — FoldRun pipeline',
+    blurb: 'A100 40GB on demand — FoldRun pipeline',
   },
   {
     id: 'esmfold-tpu',
     modelId: 'esmfold',
     siliconId: 'tpu',
-    label: 'ESMFold — TPU v6e (TorchTPU)',
+    label: 'ESMFold — TPU v5e (TorchTPU)',
     shortLabel: 'ESMFold · TPU',
     modelName: 'ESMFold',
-    siliconName: 'TPU v6e',
+    siliconName: 'TPU v5e',
     apiBase: '',
-    pricePerSec: 0.000556,
+    pricePerSec: 0.000333,
     accent: 'border-cyan-400/60',
     talkTrackSlide: 12,
     talkTrackLabel: 'TorchTPU — existing PyTorch code, device=\'tpu\'',
-    blurb: 'v6e-4 Spot — PyTorch via torch_xla (validates Slide 12)',
+    blurb: 'v5e-4 on demand, one chip per job — PyTorch via torch_xla (validates Slide 12)',
   },
   {
     id: 'esmfold-gpu',
@@ -81,11 +82,11 @@ export const BACKENDS: AcceleratorBackend[] = [
     modelName: 'ESMFold',
     siliconName: 'A100 40GB',
     apiBase: '',
-    pricePerSec: 0.001019,
+    pricePerSec: 0.00102,
     accent: 'border-orange-400/60',
     talkTrackSlide: 15,
     talkTrackLabel: 'AI Models — ESMFold (2.1M downloads, MIT)',
-    blurb: 'A100 40GB Spot — HuggingFace transformers',
+    blurb: 'A100 40GB on demand — HuggingFace transformers',
   },
   {
     id: 'boltz2-tpu',
@@ -96,11 +97,11 @@ export const BACKENDS: AcceleratorBackend[] = [
     modelName: 'Boltz-2',
     siliconName: 'TPU v6e',
     apiBase: '',
-    pricePerSec: 0.000556,
+    pricePerSec: 0.00075,
     accent: 'border-violet-400/60',
     talkTrackSlide: 12,
     talkTrackLabel: 'TorchTPU — PyTorch diffusion model on TPU',
-    blurb: 'v6e-4 Spot — proteins + RNA + DNA + ligands',
+    blurb: 'v6e-4 on demand, one chip per job — proteins + RNA + DNA + ligands',
   },
   {
     id: 'boltz2-gpu',
@@ -111,11 +112,11 @@ export const BACKENDS: AcceleratorBackend[] = [
     modelName: 'Boltz-2',
     siliconName: 'A100 40GB',
     apiBase: '',
-    pricePerSec: 0.001019,
+    pricePerSec: 0.00102,
     accent: 'border-rose-400/60',
     talkTrackSlide: 15,
     talkTrackLabel: 'Proteins + RNA + DNA + ligands — open model',
-    blurb: 'A100 40GB Spot — Boltz-2 (MIT license)',
+    blurb: 'A100 40GB on demand — Boltz-2 (MIT license)',
   },
 ]
 

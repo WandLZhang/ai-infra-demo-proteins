@@ -44,14 +44,15 @@ export AR_REPO="${AR_REPO:-proteins}"
 export AR_REGION="${AR_REGION:-us-east5}"
 
 # ------------------------------------------------------------------
-# Per-second pricing for cost ticker (Cloud Billing Catalog API SKUs)
+# Per-second pricing for the cost ticker: the on-demand price of one accelerator, the smallest machine
+# that runs each job (each TPU job uses one chip). Cloud Billing Catalog API, 2026-10-31.
 # ------------------------------------------------------------------
-# TPU v6e Trillium 4-chip: 4 × $0.50/chip-hr / 3600 = $0.000556/sec
-# H100-mega 8-GPU:         8 × $4.4239/chip-hr / 3600 = $0.009831/sec
-# A100 40GB 1-GPU:         1 × $3.67/chip-hr / 3600   = $0.001019/sec
-export TPU_PRICE_PER_SEC="0.000556"
-export GPU_H100_PRICE_PER_SEC="0.009831"
-export GPU_A100_PRICE_PER_SEC="0.001019"
+# TPU v5e (ESMFold, AF2 on nih-v5e-c1a): 1 × $1.20/chip-hr / 3600 = $0.000333/sec
+# TPU v6e (Boltz-2 on east5a-3):         1 × $2.70/chip-hr / 3600 = $0.000750/sec
+# A100 40GB (a2-highgpu-1g):             $3.673385/hr / 3600      = $0.001020/sec
+export TPU_V5E_PRICE_PER_SEC="0.000333333"
+export TPU_V6E_PRICE_PER_SEC="0.00075"
+export GPU_A100_PRICE_PER_SEC="0.00102038"
 
 # ------------------------------------------------------------------
 # Cloud Storage through the JSON API with curl
